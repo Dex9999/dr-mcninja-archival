@@ -4,38 +4,35 @@ const fs = require('fs');
 
 const app = express();
 require('dotenv').config();
+const fetch = require('node-fetch');
 
-const archiveDirectory = 'archives'; 
 const port = process.env.PORT || 5000;
-
-app.use(express.static(path.join(__dirname + '/archives')));
   
-app.get('/archives/comic/:filename', (req, res) => {
+app.get('/archives/comic/:filename', async (req, res) => {
+    try {
+        const extensions = ['.png', '.jpg', '.gif']; // Add more extensions as needed
+        let matchingFile = null;
 
-    fs.readdir(archiveDirectory, (err, files) => {
-        if (err) {
-            console.error('Error reading archive directory:', err);
-            return res.status(500).send('Internal Server Error');
+        for (const ext of extensions) {
+            const response = await fetch(`https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${req.params.filename}${ext}`);
+            
+            if (response.ok) {
+                matchingFile = `${req.params.filename}${ext}`;
+                break;
+            }
         }
-
-        const matchingFile = files.find(file => file.includes(req.params.filename));
 
         if (!matchingFile) {
-            return res.status(404).send('File not found');
+            throw new Error('File not found');
         }
 
-        const filePath = path.join(archiveDirectory, matchingFile);
-        const fileStream = fs.createReadStream(filePath);
+        res.setHeader('Content-Type', getContentType(matchingFile));
 
-        res.setHeader('Content-Type', getContentType(filePath));
-
-
-        fileStream.on('error', (error) => {
-            res.status(500).send('Internal Server Error');
-        });
-
-        fileStream.pipe(res);
-    });
+        response.body.pipe(res);
+    } catch (error) {
+        console.error('Error fetching file:', error);
+        res.status(500).send('Internal Server Error');
+    }
 });
 
 function getContentType(filePath) {
