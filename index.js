@@ -8,7 +8,7 @@ require('dotenv').config();
 const archiveDirectory = 'archives'; 
 const port = process.env.PORT || 5000;
 
-app.use(express.static(path.join(__dirname, 'archives')));
+app.use(express.static(path.join(__dirname + '/archives')));
   
 app.get('/archives/comic/:filename', (req, res) => {
 
