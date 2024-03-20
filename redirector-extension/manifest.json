@@ -1,0 +1,19 @@
+{
+    "manifest_version": 3,
+    "name": "DR McNinja Redirector",
+    "version": "2.0",
+    "permissions": ["webRequest","declarativeNetRequest",
+    "declarativeNetRequestFeedback"],
+    "host_permissions": ["*://*.drmcninja.com/*", "*://drmcninja.vercel.app/*"],
+    "declarative_net_request": {
+        "rule_resources": [
+          {
+            "id": "redirectRule",
+            "enabled": true,
+            "path": "rules.json"
+          }
+        ]
+      },
+    "action": {}
+  }
+  

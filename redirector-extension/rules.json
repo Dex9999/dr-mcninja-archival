@@ -1,0 +1,16 @@
+[{
+    "id": 1,
+    "priority": 1,
+    "condition": {
+      "urlFilter": "*drmcninja.com/",
+      "resourceTypes": ["main_frame"]
+    },
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "transform": {
+            "host": "drmcninja.vercel.app"
+          }
+      }
+    }
+}]
