@@ -4,6 +4,7 @@ const fs = require('fs');
 
 const app = express();
 const archiveDirectory = 'archives'; 
+const port = process.env.PORT || 3000;
 
 app.get('/archives/comic/:filename', (req, res) => {
 
@@ -47,7 +48,6 @@ function getContentType(filePath) {
     }
 }
 
-const port = process.env.PORT || 5000;
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
 });

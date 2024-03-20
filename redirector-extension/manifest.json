@@ -1,6 +1,6 @@
 {
     "manifest_version": 3,
-    "name": "DR McNinja Redirector",
+    "name": "DrMcNinja Redirector",
     "version": "2.0",
     "permissions": ["webRequest","declarativeNetRequest",
     "declarativeNetRequestFeedback"],
