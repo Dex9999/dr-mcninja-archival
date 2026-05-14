@@ -51,8 +51,8 @@ function loadComics() {
 
     const files = JSON.parse(fs.readFileSync(COMIC_MANIFEST_PATH, 'utf-8'));
 
-    const legacy = new Map(); // page -> Set(ext)
-    const chaptered = new Map(); // "c/p" -> Set(ext)
+    const legacy = new Map();     // page -> Set(ext)
+    const chaptered = new Map();  // chapter/page -> Set(ext)
 
     for (const f of files) {
         const parsed = path.parse(f.name);
@@ -68,53 +68,47 @@ function loadComics() {
         const code = EXT_MAP[ext];
         if (!code) continue;
 
-        /*
-        |--------------------------------------------------------------------------
-        | LEGACY (no chapter)
-        |--------------------------------------------------------------------------
-        */
         if (chapter === null) {
             if (!legacy.has(page)) legacy.set(page, new Set());
             legacy.get(page).add(code);
-            continue;
+        } else {
+            const key = `${chapter}/${page}`;
+            if (!chaptered.has(key)) chaptered.set(key, new Set());
+            chaptered.get(key).add(code);
         }
-
-        /*
-        |--------------------------------------------------------------------------
-        | CHAPTERED
-        |--------------------------------------------------------------------------
-        */
-        const key = `${chapter}/${page}`;
-        if (!chaptered.has(key)) chaptered.set(key, new Set());
-        chaptered.get(key).add(code);
     }
 
     const output = [];
 
     /*
     |--------------------------------------------------------------------------
-    | 1) LEGACY SORTED:
-    |    ALL JPG FIRST, THEN PNG, THEN GIF
-    |    BUT WITHIN EACH: 1,2,3,4...
+    | 1) LEGACY: GROUP BY EXTENSION FIRST (THIS IS YOUR FIX)
     |--------------------------------------------------------------------------
     */
 
     const legacyPages = [...legacy.entries()]
         .map(([page, variants]) => ({
             page,
-            variants: [...variants].sort((a, b) => EXT_PRIORITY[a] - EXT_PRIORITY[b])
+            variants: [...variants]
         }))
         .sort((a, b) => a.page - b.page);
 
-    for (const p of legacyPages) {
-        for (const v of p.variants) {
-            output.push(`${p.page}${v}`); // 1j, 1p, 1g
+    const pushByExtOrder = (ext) => {
+        for (const p of legacyPages) {
+            if (p.variants.includes(ext)) {
+                output.push(`${p.page}${ext}`);
+            }
         }
-    }
+    };
+
+    // EXACT ORDER YOU WANTED:
+    pushByExtOrder('j'); // 1j 2j 3j ...
+    pushByExtOrder('p'); // 1p 2p 3p ...
+    pushByExtOrder('g'); // 1g 2g 3g ...
 
     /*
     |--------------------------------------------------------------------------
-    | 2) CHAPTERED SORTED
+    | 2) CHAPTERED (same logic but grouped correctly too)
     |--------------------------------------------------------------------------
     */
 
@@ -124,7 +118,7 @@ function loadComics() {
             return {
                 chapter: c,
                 page: p,
-                variants: [...variants].sort((a, b) => EXT_PRIORITY[a] - EXT_PRIORITY[b])
+                variants: [...variants]
             };
         })
         .sort((a, b) => {
@@ -132,11 +126,17 @@ function loadComics() {
             return a.page - b.page;
         });
 
-    for (const p of chapterPages) {
-        for (const v of p.variants) {
-            output.push(`${p.chapter}/${p.page}${v}`);
+    const pushChapterByExt = (ext) => {
+        for (const p of chapterPages) {
+            if (p.variants.includes(ext)) {
+                output.push(`${p.chapter}/${p.page}${ext}`);
+            }
         }
-    }
+    };
+
+    pushChapterByExt('j');
+    pushChapterByExt('p');
+    pushChapterByExt('g');
 
     return output;
 }
