@@ -4,7 +4,8 @@ const fs = require('fs');
 
 const app = express();
 require('dotenv').config();
-const fetch = require('node-fetch');
+const fetch = (...args) =>
+    import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const port = process.env.PORT || 5000;
   
