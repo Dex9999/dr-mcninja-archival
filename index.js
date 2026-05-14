@@ -139,60 +139,68 @@ setInterval(() => {
 */
 
 app.get('/', (req, res) => {
-    if (!comics.length) return res.send('<h1 style="color:white;background:#111;margin:0;padding:40px;">No comics found</h1>');
-
-    // -----------------------------
-    // SAFE GROUPING (NO STRING PARSING IN RENDER)
-    // -----------------------------
-    const grouped = new Map();
-
-    for (const c of comics) {
-        // format: chapter/pageext  OR pageext
-        const match = c.match(/^(\d+)(?:\/(\d+))?([jpgpnggif])$/);
-        if (!match) continue;
-
-        const chapter = match[2] ? Number(match[1]) : 0;
-        const page = match[2] ? Number(match[2]) : Number(match[1]);
-        const ext = match[3];
-
-        const key = chapter;
-
-        if (!grouped.has(key)) grouped.set(key, []);
-        grouped.get(key).push({ chapter, page, ext, id: c });
+    if (!comics.length) {
+        return res.send('<h1 style="color:white;background:#111;margin:0;padding:40px;">No comics found</h1>');
     }
 
-    const chapters = [...grouped.entries()]
-        .sort((a, b) => a[0] - b[0]);
+    const main = new Map();     // chapter/page/ext
+    const special = new Map();  // page/ext only
+
+    for (const c of comics) {
+
+        // MAIN: 0/1j
+        const mainMatch = c.match(/^(\d+)\/(\d+)([jpgpnggif])$/);
+        if (mainMatch) {
+            const chapter = Number(mainMatch[1]);
+            const page = Number(mainMatch[2]);
+            const ext = mainMatch[3];
+
+            const key = `${chapter}/${page}`;
+
+            if (!main.has(key)) main.set(key, []);
+            main.get(key).push({ id: c, page, ext, chapter });
+
+            continue;
+        }
+
+        // SPECIAL: 1j
+        const specialMatch = c.match(/^(\d+)([jpgpnggif])$/);
+        if (specialMatch) {
+            const page = Number(specialMatch[1]);
+            const ext = specialMatch[2];
+
+            const key = page;
+
+            if (!special.has(key)) special.set(key, []);
+            special.get(key).push({ id: c, page, ext });
+
+            continue;
+        }
+    }
+
+    const extOrder = { j: 0, p: 1, g: 2 };
 
     res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-<title>Comic Archive</title>
+<title>Dr McNinja Comics</title>
 
 <style>
 body {
     margin: 0;
     background: #0b0b0f;
     color: white;
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    font-family: system-ui;
 }
 
-/* HERO */
 .hero {
     padding: 50px 20px 20px;
     text-align: center;
 }
 
-.title {
-    font-size: 40px;
-    font-weight: 700;
-}
-
-.subtitle {
-    opacity: 0.6;
-    margin-top: 6px;
-}
+.title { font-size: 40px; font-weight: 700; }
+.subtitle { opacity: 0.6; }
 
 .start {
     display: inline-block;
@@ -202,27 +210,24 @@ body {
     border-radius: 10px;
     color: white;
     text-decoration: none;
-    font-weight: 600;
 }
 
-/* CONTAINER */
 .container {
     max-width: 1000px;
-    margin: 0 auto;
+    margin: auto;
     padding: 20px;
 }
 
-.chapter {
-    margin-bottom: 30px;
+.section {
+    margin-bottom: 40px;
 }
 
-.chapter-title {
+.section-title {
     font-size: 18px;
     opacity: 0.8;
     margin-bottom: 10px;
 }
 
-/* GRID */
 .grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
@@ -235,20 +240,17 @@ body {
     border-radius: 10px;
     padding: 10px;
     text-align: center;
-    color: white;
     text-decoration: none;
+    color: white;
     transition: 0.15s;
 }
 
 .card:hover {
-    background: rgba(255,255,255,0.12);
     transform: translateY(-2px);
+    background: rgba(255,255,255,0.12);
 }
 
-.small {
-    font-size: 11px;
-    opacity: 0.5;
-}
+.small { font-size: 11px; opacity: 0.5; }
 </style>
 
 </head>
@@ -256,30 +258,50 @@ body {
 <body>
 
 <div class="hero">
-    <div class="title">🥷 Comic Archive</div>
-    <div class="subtitle">Manga-style reader</div>
-    <a class="start" href="/comic/${comics[0]}">Start Reading →</a>
+    <div class="title">Dr McNinja Comics</div>
+    <div class="subtitle">Archived and easier to read</div>
+    <a class="start" href="/comic/${comics[0]}">Dive In →</a>
 </div>
 
 <div class="container">
 
-${chapters.map(([ch, pages]) => `
-    <div class="chapter">
-        <div class="chapter-title">Chapter ${ch}</div>
+<!-- ================= MAIN ================= -->
+<div class="section">
+    <div class="section-title">Main Series</div>
+    <div class="grid">
+        ${
+            [...main.entries()]
+                .map(([_, arr]) => arr)
+                .flat()
+                .sort((a,b) => a.chapter - b.chapter || a.page - b.page || extOrder[a.ext] - extOrder[b.ext])
+                .map(p => `
+                    <a class="card" href="/comic/${p.id}">
+                        <div>${p.chapter}/${p.page}</div>
+                        <div class="small">${p.ext}</div>
+                    </a>
+                `).join('')
+        }
+    </div>
+</div>
 
-        <div class="grid">
-            ${pages
-                .sort((a,b) => a.page - b.page)
+<!-- ================= SPECIAL ================= -->
+<div class="section">
+    <div class="section-title">Special Pages</div>
+    <div class="grid">
+        ${
+            [...special.entries()]
+                .map(([_, arr]) => arr)
+                .flat()
+                .sort((a,b) => a.page - b.page || extOrder[a.ext] - extOrder[b.ext])
                 .map(p => `
                     <a class="card" href="/comic/${p.id}">
                         <div>${p.page}</div>
                         <div class="small">${p.ext}</div>
                     </a>
                 `).join('')
-            }
-        </div>
+        }
     </div>
-`).join('')}
+</div>
 
 </div>
 
