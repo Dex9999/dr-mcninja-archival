@@ -55,43 +55,33 @@ function loadComics() {
         const match = base.match(/^(?:(\d+))?p(\d+)$/i);
         if (!match) continue;
 
-        const chapter = match[1] ? Number(match[1]) : null;
+        const chapter = match[1] ? Number(match[1]) : 0;
         const page = Number(match[2]);
 
         const code = EXT_MAP[ext];
         if (!code) continue;
 
-        /*
-        |--------------------------------------------------------------------------
-        | FULL UNIQUE ENTRY
-        |--------------------------------------------------------------------------
-        */
         pages.push({
-            chapter: chapter ?? 0,
+            chapter,
             page,
             ext: code,
-            id: chapter === null
-                ? `${page}${code}`     // /1j
-                : `${chapter}/${page}${code}` // /0/1j
+            id: `${chapter}/${page}${code}`
         });
     }
 
     /*
     |--------------------------------------------------------------------------
-    | SORTING RULE
-    |--------------------------------------------------------------------------
-    | 1. chapter asc
-    | 2. page asc
-    | 3. extension asc (j → p → g)
+    | FINAL SORT ORDER:
+    | chapter → extension → page
     |--------------------------------------------------------------------------
     */
 
+    const extOrder = { j: 0, p: 1, g: 2 };
+
     pages.sort((a, b) => {
         if (a.chapter !== b.chapter) return a.chapter - b.chapter;
-        if (a.page !== b.page) return a.page - b.page;
-
-        const order = { j: 0, p: 1, g: 2 };
-        return order[a.ext] - order[b.ext];
+        if (a.ext !== b.ext) return extOrder[a.ext] - extOrder[b.ext];
+        return a.page - b.page;
     });
 
     return pages.map(p => p.id);
