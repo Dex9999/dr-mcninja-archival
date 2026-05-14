@@ -139,26 +139,30 @@ setInterval(() => {
 */
 
 app.get('/', (req, res) => {
-    if (!comics.length) return res.send('<h1>No comics found</h1>');
-
-    app.get('/', (req, res) => {
     if (!comics.length) return res.send('<h1 style="color:white;background:#111;margin:0;padding:40px;">No comics found</h1>');
 
-    // Group into chapters for cleaner display
+    // -----------------------------
+    // SAFE GROUPING (NO STRING PARSING IN RENDER)
+    // -----------------------------
     const grouped = new Map();
 
     for (const c of comics) {
-        const match = c.match(/^(\d+)\/(\d+)/);
+        // format: chapter/pageext  OR pageext
+        const match = c.match(/^(\d+)(?:\/(\d+))?([jpgpnggif])$/);
         if (!match) continue;
 
-        const chapter = match[1];
+        const chapter = match[2] ? Number(match[1]) : 0;
+        const page = match[2] ? Number(match[2]) : Number(match[1]);
+        const ext = match[3];
 
-        if (!grouped.has(chapter)) grouped.set(chapter, []);
-        grouped.get(chapter).push(c);
+        const key = chapter;
+
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key).push({ chapter, page, ext, id: c });
     }
 
     const chapters = [...grouped.entries()]
-        .sort((a, b) => Number(a[0]) - Number(b[0]));
+        .sort((a, b) => a[0] - b[0]);
 
     res.send(`
 <!DOCTYPE html>
@@ -174,42 +178,36 @@ body {
     font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
 }
 
-/* ================= HERO ================= */
+/* HERO */
 .hero {
-    padding: 60px 20px 30px;
+    padding: 50px 20px 20px;
     text-align: center;
 }
 
 .title {
-    font-size: 42px;
+    font-size: 40px;
     font-weight: 700;
-    margin-bottom: 10px;
 }
 
 .subtitle {
     opacity: 0.6;
-    margin-bottom: 20px;
+    margin-top: 6px;
 }
 
 .start {
     display: inline-block;
-    padding: 14px 22px;
+    margin-top: 16px;
+    padding: 12px 18px;
     background: #7c5cff;
-    border-radius: 12px;
+    border-radius: 10px;
     color: white;
     text-decoration: none;
     font-weight: 600;
-    transition: 0.15s;
 }
 
-.start:hover {
-    transform: scale(1.05);
-    background: #6a4df0;
-}
-
-/* ================= GRID ================= */
+/* CONTAINER */
 .container {
-    max-width: 1100px;
+    max-width: 1000px;
     margin: 0 auto;
     padding: 20px;
 }
@@ -220,10 +218,11 @@ body {
 
 .chapter-title {
     font-size: 18px;
-    margin: 10px 0;
     opacity: 0.8;
+    margin-bottom: 10px;
 }
 
+/* GRID */
 .grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
@@ -236,10 +235,8 @@ body {
     border-radius: 10px;
     padding: 10px;
     text-align: center;
-
-    text-decoration: none;
     color: white;
-
+    text-decoration: none;
     transition: 0.15s;
 }
 
@@ -249,8 +246,8 @@ body {
 }
 
 .small {
-    font-size: 12px;
-    opacity: 0.6;
+    font-size: 11px;
+    opacity: 0.5;
 }
 </style>
 
@@ -259,9 +256,8 @@ body {
 <body>
 
 <div class="hero">
-    <div class="title">📚 Comic Archive</div>
+    <div class="title">🥷 Comic Archive</div>
     <div class="subtitle">Manga-style reader</div>
-
     <a class="start" href="/comic/${comics[0]}">Start Reading →</a>
 </div>
 
@@ -272,12 +268,15 @@ ${chapters.map(([ch, pages]) => `
         <div class="chapter-title">Chapter ${ch}</div>
 
         <div class="grid">
-            ${pages.map(p => `
-                <a class="card" href="/comic/${p}">
-                    <div>${p.split('/')[1] || p}</div>
-                    <div class="small">${p.split('/')[2] || ''}</div>
-                </a>
-            `).join('')}
+            ${pages
+                .sort((a,b) => a.page - b.page)
+                .map(p => `
+                    <a class="card" href="/comic/${p.id}">
+                        <div>${p.page}</div>
+                        <div class="small">${p.ext}</div>
+                    </a>
+                `).join('')
+            }
         </div>
     </div>
 `).join('')}
@@ -287,7 +286,6 @@ ${chapters.map(([ch, pages]) => `
 </body>
 </html>
     `);
-});
 });
 
 /*
