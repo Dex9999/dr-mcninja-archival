@@ -25,6 +25,8 @@ const EXT_MAP = {
     '.gif': 'g'
 };
 
+const EXT_PRIORITY = { j: 0, p: 1, g: 2 };
+
 const EXT_MAP_REVERSE = {
     j: '.jpg',
     p: '.png',
@@ -33,7 +35,14 @@ const EXT_MAP_REVERSE = {
 
 /*
 |--------------------------------------------------------------------------
-| LOAD + ORDER COMICS (GROUP BY PAGE, SORT PROPERLY)
+| LOAD + ORDER COMICS
+|--------------------------------------------------------------------------
+| ORDER RULES:
+| 1) legacy format FIRST: 0p1, 0p2, p1, p2 (no extensions in id)
+| 2) then extension variants sorted by ext priority: jpg -> png -> gif
+| 3) final URL format:
+|    legacy: /comic/1
+|    variant: /comic/1j, /comic/1p, /comic/1g
 |--------------------------------------------------------------------------
 */
 
@@ -45,8 +54,8 @@ function loadComics() {
 
     const files = JSON.parse(fs.readFileSync(COMIC_MANIFEST_PATH, 'utf-8'));
 
-    // group pages: chapter/page -> variants
-    const map = new Map();
+    const pages = new Map();
+    const legacySet = new Set();
 
     for (const f of files) {
         const parsed = path.parse(f.name);
@@ -56,25 +65,29 @@ function loadComics() {
         const match = base.match(/^(?:(\d+))?p(\d+)$/i);
         if (!match) continue;
 
-        const chapter = match?.[1] ? Number(match[1]) : 0;
+        const chapter = match?.[1] ? Number(match[1]) : null;
         const page = Number(match[2]);
 
-        const key = `${chapter}/${page}`;
+        const key = chapter === null ? `p/${page}` : `${chapter}/${page}`;
 
-        if (!map.has(key)) {
-            map.set(key, {
-                chapter,
+        if (!pages.has(key)) {
+            pages.set(key, {
+                chapter: chapter ?? -1,
                 page,
                 variants: new Set()
             });
         }
 
         const code = EXT_MAP[ext];
-        if (code) map.get(key).variants.add(code);
+        if (code) pages.get(key).variants.add(code);
+
+        // detect legacy preference (original format existence)
+        if (chapter === null) {
+            legacySet.add(page);
+        }
     }
 
-    // sort logical pages
-    const pages = [...map.entries()]
+    const sorted = [...pages.entries()]
         .map(([key, v]) => ({
             key,
             chapter: v.chapter,
@@ -86,15 +99,51 @@ function loadComics() {
             return a.page - b.page;
         });
 
-    // flatten into navigation list (ONE entry per page)
-    return pages.map(p => {
-        const best =
-            p.variants.includes('p') ? 'p' :
-            p.variants.includes('j') ? 'j' :
-            'g';
+    const output = [];
 
-        return `${p.key}/${best}`;
-    });
+    for (const p of sorted) {
+        const legacy = p.chapter === -1;
+
+        /*
+        |--------------------------------------------------------------------------
+        | 1) LEGACY FIRST
+        |--------------------------------------------------------------------------
+        */
+
+        if (legacy) {
+            output.push({
+                type: 'legacy',
+                id: `${p.page}`, // /1 /2 /3
+                chapter: null,
+                page: p.page
+            });
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | 2) VARIANT FILES (sorted by extension priority)
+        |--------------------------------------------------------------------------
+        */
+
+        const sortedVariants = p.variants.sort(
+            (a, b) => EXT_PRIORITY[a] - EXT_PRIORITY[b]
+        );
+
+        for (const v of sortedVariants) {
+            const baseId = legacy
+                ? `${p.page}${v}`          // /1j /1p /1g
+                : `${p.chapter}/${p.page}${v}`;
+
+            output.push({
+                type: 'variant',
+                id: baseId,
+                chapter: p.chapter === -1 ? null : p.chapter,
+                page: p.page
+            });
+        }
+    }
+
+    return output.map(x => x.id);
 }
 
 let comics = loadComics();
@@ -144,14 +193,23 @@ ${comics.map(c => `<a class="comic-link" href="/comic/${c}">${c}</a>`).join('')}
 
 /*
 |--------------------------------------------------------------------------
-| COMIC ROUTE
+| ROUTE
+|--------------------------------------------------------------------------
+| supports:
+| /1j  (legacy page variants)
+| /0/1j (chapter/page variants)
 |--------------------------------------------------------------------------
 */
 
-app.get('/comic/:chapter/:page/:ext', (req, res) => {
-    const { chapter, page, ext } = req.params;
+app.get('/comic/:a/:b?', (req, res) => {
+    let id;
 
-    const id = `${chapter}/${page}/${ext}`;
+    if (!req.params.b) {
+        id = req.params.a; // /1j or /1
+    } else {
+        id = `${req.params.a}/${req.params.b}`;
+    }
+
     const index = comics.indexOf(id);
 
     if (index === -1) {
@@ -161,7 +219,7 @@ app.get('/comic/:chapter/:page/:ext', (req, res) => {
     const prev = index > 0 ? comics[index - 1] : null;
     const next = index < comics.length - 1 ? comics[index + 1] : null;
 
-    const toUrl = (x) => `/comic/${x.replace(/\//g, '/')}`;
+    const toUrl = (x) => `/comic/${x}`;
 
     res.send(`
 <!DOCTYPE html>
@@ -181,8 +239,8 @@ img { max-width:95%; margin-top:20px; border-radius:8px; box-shadow:0 0 20px rgb
 <div class="topbar">
 <a class="nav" href="/">Home</a>
 
-${prev ? `<a class="nav" href="/comic/${prev.replace(/\//g, '/')}">← Prev</a>` : `<span class="nav disabled">← Prev</span>`}
-${next ? `<a class="nav" href="/comic/${next.replace(/\//g, '/')}">Next →</a>` : `<span class="nav disabled">Next →</span>`}
+${prev ? `<a class="nav" href="${toUrl(prev)}">← Prev</a>` : `<span class="nav disabled">← Prev</span>`}
+${next ? `<a class="nav" href="${toUrl(next)}">Next →</a>` : `<span class="nav disabled">Next →</span>`}
 </div>
 
 <img src="/archives/comic/${id}" />
@@ -200,15 +258,25 @@ ${next ? `<a class="nav" href="/comic/${next.replace(/\//g, '/')}">Next →</a>`
 |--------------------------------------------------------------------------
 */
 
-app.get('/archives/comic/:chapter/:page/:ext', async (req, res) => {
+app.get('/archives/comic/:id', async (req, res) => {
     try {
-        const { chapter, page, ext } = req.params;
+        const id = req.params.id;
 
-        const extFull = EXT_MAP_REVERSE[ext];
-        if (!extFull) return res.status(400).send('Invalid extension');
+        // /1j OR /0/1j
+        const match = id.match(/^(\d+\/)?(\d+)([jpgpnggif])$/i);
+        if (!match) return res.status(400).send('Invalid id');
 
-        const base = `${chapter}p${page}`;
-        const filename = `${base}${extFull}`;
+        const chapterPart = match[1]; // optional "0/"
+        const page = match[2];
+        const extCode = match[3];
+
+        const ext = EXT_MAP_REVERSE[extCode];
+
+        const base = chapterPart
+            ? `${chapterPart.replace('/', '')}p${page}`
+            : `p${page}`;
+
+        const filename = `${base}${ext}`;
 
         const url =
             `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${filename}`;
@@ -221,7 +289,7 @@ app.get('/archives/comic/:chapter/:page/:ext', async (req, res) => {
 
         const buffer = Buffer.from(await response.arrayBuffer());
 
-        res.setHeader('Content-Type', getContentType(extFull));
+        res.setHeader('Content-Type', getContentType(ext));
         return res.send(buffer);
 
     } catch (err) {
