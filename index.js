@@ -33,7 +33,7 @@ const EXT_MAP_REVERSE = {
 
 /*
 |--------------------------------------------------------------------------
-| LOAD COMICS
+| LOAD + ORDER COMICS (GROUP BY PAGE, SORT PROPERLY)
 |--------------------------------------------------------------------------
 */
 
@@ -45,43 +45,56 @@ function loadComics() {
 
     const files = JSON.parse(fs.readFileSync(COMIC_MANIFEST_PATH, 'utf-8'));
 
-    return files
-        .map(f => {
-            const parsed = path.parse(f.name);
-            const base = parsed.name;
-            const ext = parsed.ext.toLowerCase();
+    // group pages: chapter/page -> variants
+    const map = new Map();
 
-            const match = base.match(/^(?:(\d+))?p(\d+)$/i);
+    for (const f of files) {
+        const parsed = path.parse(f.name);
+        const base = parsed.name;
+        const ext = parsed.ext.toLowerCase();
 
-            const chapter = match?.[1] ? Number(match[1]) : null;
-            const page = match ? Number(match[2]) : Number(base.replace('p', ''));
+        const match = base.match(/^(?:(\d+))?p(\d+)$/i);
+        if (!match) continue;
 
-            const extCode = EXT_MAP[ext];
+        const chapter = match?.[1] ? Number(match[1]) : 0;
+        const page = Number(match[2]);
 
-            // KEY FIX:
-            // - p1 → /comic/1g
-            // - 0p1 → /comic/0/1g
-            const id =
-                chapter === null
-                    ? `${page}${extCode}`        // page-only
-                    : `${chapter}/${page}${extCode}`;
+        const key = `${chapter}/${page}`;
 
-            return {
+        if (!map.has(key)) {
+            map.set(key, {
                 chapter,
                 page,
-                ext,
-                extCode,
-                id
-            };
-        })
-        .sort((a, b) => {
-            const ac = a.chapter ?? -1;
-            const bc = b.chapter ?? -1;
+                variants: new Set()
+            });
+        }
 
-            if (ac !== bc) return ac - bc;
+        const code = EXT_MAP[ext];
+        if (code) map.get(key).variants.add(code);
+    }
+
+    // sort logical pages
+    const pages = [...map.entries()]
+        .map(([key, v]) => ({
+            key,
+            chapter: v.chapter,
+            page: v.page,
+            variants: [...v.variants]
+        }))
+        .sort((a, b) => {
+            if (a.chapter !== b.chapter) return a.chapter - b.chapter;
             return a.page - b.page;
-        })
-        .map(x => x.id);
+        });
+
+    // flatten into navigation list (ONE entry per page)
+    return pages.map(p => {
+        const best =
+            p.variants.includes('p') ? 'p' :
+            p.variants.includes('j') ? 'j' :
+            'g';
+
+        return `${p.key}/${best}`;
+    });
 }
 
 let comics = loadComics();
@@ -131,22 +144,14 @@ ${comics.map(c => `<a class="comic-link" href="/comic/${c}">${c}</a>`).join('')}
 
 /*
 |--------------------------------------------------------------------------
-| COMIC ROUTER (SUPPORTS BOTH FORMATS)
+| COMIC ROUTE
 |--------------------------------------------------------------------------
 */
 
-// /comic/1g   (page only)
-// /comic/0/1g (chapter/page)
-app.get('/comic/:a/:b?', (req, res) => {
-    let id;
+app.get('/comic/:chapter/:page/:ext', (req, res) => {
+    const { chapter, page, ext } = req.params;
 
-    if (req.params.b === undefined) {
-        // page-only
-        id = req.params.a;
-    } else {
-        id = `${req.params.a}/${req.params.b}`;
-    }
-
+    const id = `${chapter}/${page}/${ext}`;
     const index = comics.indexOf(id);
 
     if (index === -1) {
@@ -156,7 +161,7 @@ app.get('/comic/:a/:b?', (req, res) => {
     const prev = index > 0 ? comics[index - 1] : null;
     const next = index < comics.length - 1 ? comics[index + 1] : null;
 
-    const toUrl = (x) => `/comic/${x}`;
+    const toUrl = (x) => `/comic/${x.replace(/\//g, '/')}`;
 
     res.send(`
 <!DOCTYPE html>
@@ -176,8 +181,8 @@ img { max-width:95%; margin-top:20px; border-radius:8px; box-shadow:0 0 20px rgb
 <div class="topbar">
 <a class="nav" href="/">Home</a>
 
-${prev ? `<a class="nav" href="${toUrl(prev)}">← Prev</a>` : `<span class="nav disabled">← Prev</span>`}
-${next ? `<a class="nav" href="${toUrl(next)}">Next →</a>` : `<span class="nav disabled">Next →</span>`}
+${prev ? `<a class="nav" href="/comic/${prev.replace(/\//g, '/')}">← Prev</a>` : `<span class="nav disabled">← Prev</span>`}
+${next ? `<a class="nav" href="/comic/${next.replace(/\//g, '/')}">Next →</a>` : `<span class="nav disabled">Next →</span>`}
 </div>
 
 <img src="/archives/comic/${id}" />
@@ -195,25 +200,15 @@ ${next ? `<a class="nav" href="${toUrl(next)}">Next →</a>` : `<span class="nav
 |--------------------------------------------------------------------------
 */
 
-app.get('/archives/comic/:id', async (req, res) => {
+app.get('/archives/comic/:chapter/:page/:ext', async (req, res) => {
     try {
-        const id = req.params.id;
+        const { chapter, page, ext } = req.params;
 
-        const match = id.match(/^(\d+\/)?(\d+)([jpgpnggif])$/i);
-        if (!match) return res.status(400).send('Invalid id');
+        const extFull = EXT_MAP_REVERSE[ext];
+        if (!extFull) return res.status(400).send('Invalid extension');
 
-        const chapterPart = match[1]; // "0/" or undefined
-        const page = match[2];
-        const extCode = match[3];
-
-        const ext = EXT_MAP_REVERSE[extCode];
-        if (!ext) return res.status(400).send('Bad extension');
-
-        const base = chapterPart
-            ? `${chapterPart.replace('/', '')}p${page}`
-            : `p${page}`;
-
-        const filename = `${base}${ext}`;
+        const base = `${chapter}p${page}`;
+        const filename = `${base}${extFull}`;
 
         const url =
             `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${filename}`;
@@ -226,7 +221,7 @@ app.get('/archives/comic/:id', async (req, res) => {
 
         const buffer = Buffer.from(await response.arrayBuffer());
 
-        res.setHeader('Content-Type', getContentType(ext));
+        res.setHeader('Content-Type', getContentType(extFull));
         return res.send(buffer);
 
     } catch (err) {
