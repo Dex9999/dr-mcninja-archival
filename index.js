@@ -250,7 +250,7 @@ app.get('/archives/comic/:id', async (req, res) => {
             const page = main[2];
 
             // try best available format
-            const tryExts = ['.png', '.jpg', '.gif'];
+            const tryExts = ['.jpg','.png', '.gif'];
 
             for (const ext of tryExts) {
                 const filename = `${chapter}p${page}${ext}`;
