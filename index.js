@@ -53,20 +53,32 @@ function loadComics() {
 
             const match = base.match(/^(?:(\d+))?p(\d+)$/i);
 
-            const chapter = match?.[1] ? Number(match[1]) : 0;
-            const page = match ? Number(match[2]) : 0;
+            const chapter = match?.[1] ? Number(match[1]) : null;
+            const page = match ? Number(match[2]) : Number(base.replace('p', ''));
 
             const extCode = EXT_MAP[ext];
+
+            // KEY FIX:
+            // - p1 → /comic/1g
+            // - 0p1 → /comic/0/1g
+            const id =
+                chapter === null
+                    ? `${page}${extCode}`        // page-only
+                    : `${chapter}/${page}${extCode}`;
 
             return {
                 chapter,
                 page,
+                ext,
                 extCode,
-                id: `${chapter}/${page}${extCode}`
+                id
             };
         })
         .sort((a, b) => {
-            if (a.chapter !== b.chapter) return a.chapter - b.chapter;
+            const ac = a.chapter ?? -1;
+            const bc = b.chapter ?? -1;
+
+            if (ac !== bc) return ac - bc;
             return a.page - b.page;
         })
         .map(x => x.id);
@@ -119,33 +131,38 @@ ${comics.map(c => `<a class="comic-link" href="/comic/${c}">${c}</a>`).join('')}
 
 /*
 |--------------------------------------------------------------------------
-| COMIC VIEWER
+| COMIC ROUTER (SUPPORTS BOTH FORMATS)
 |--------------------------------------------------------------------------
 */
 
-app.get('/comic/:chapter/:page', (req, res) => {
-    const { chapter, page } = req.params;
+// /comic/1g   (page only)
+// /comic/0/1g (chapter/page)
+app.get('/comic/:a/:b?', (req, res) => {
+    let id;
 
-    const baseId = `${chapter}/${page}`;
-    const index = comics.indexOf(baseId + 'j')
-        || comics.indexOf(baseId + 'p')
-        || comics.indexOf(baseId + 'g');
+    if (req.params.b === undefined) {
+        // page-only
+        id = req.params.a;
+    } else {
+        id = `${req.params.a}/${req.params.b}`;
+    }
+
+    const index = comics.indexOf(id);
 
     if (index === -1) {
         return res.status(404).send('Comic not found');
     }
 
-    const current = comics[index];
     const prev = index > 0 ? comics[index - 1] : null;
     const next = index < comics.length - 1 ? comics[index + 1] : null;
 
-    const imgUrl = `/archives/comic/${current}`;
+    const toUrl = (x) => `/comic/${x}`;
 
     res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-<title>${current}</title>
+<title>${id}</title>
 <style>
 body { margin:0; background:#111; color:white; font-family:Arial; text-align:center; }
 .topbar { position:sticky; top:0; background:#1b1b1b; padding:14px; border-bottom:1px solid #333; }
@@ -159,14 +176,13 @@ img { max-width:95%; margin-top:20px; border-radius:8px; box-shadow:0 0 20px rgb
 <div class="topbar">
 <a class="nav" href="/">Home</a>
 
-${prev ? `<a class="nav" href="/comic/${prev.replace('/', '/')}">← Prev</a>` : `<span class="nav disabled">← Prev</span>`}
-
-${next ? `<a class="nav" href="/comic/${next.replace('/', '/')}">Next →</a>` : `<span class="nav disabled">Next →</span>`}
+${prev ? `<a class="nav" href="${toUrl(prev)}">← Prev</a>` : `<span class="nav disabled">← Prev</span>`}
+${next ? `<a class="nav" href="${toUrl(next)}">Next →</a>` : `<span class="nav disabled">Next →</span>`}
 </div>
 
-<img src="${imgUrl}" />
+<img src="/archives/comic/${id}" />
 
-<div style="margin:10px;color:#aaa;">${chapter}/${page}</div>
+<div style="margin:10px;color:#aaa;">${id}</div>
 
 </body>
 </html>
@@ -181,21 +197,26 @@ ${next ? `<a class="nav" href="/comic/${next.replace('/', '/')}">Next →</a>` :
 
 app.get('/archives/comic/:id', async (req, res) => {
     try {
-        const id = req.params.id; // e.g. 0/1j
+        const id = req.params.id;
 
-        const match = id.match(/^(\d+)\/(\d+)([jpgp|pngp|gifg])$/i);
-        const safe = id; // fallback
+        const match = id.match(/^(\d+\/)?(\d+)([jpgpnggif])$/i);
+        if (!match) return res.status(400).send('Invalid id');
 
-        // better parse
-        const [, chapter, page, extCode] = id.match(/^(\d+)\/(\d+)([jpgpnggif]{1})$/i) || [];
+        const chapterPart = match[1]; // "0/" or undefined
+        const page = match[2];
+        const extCode = match[3];
 
         const ext = EXT_MAP_REVERSE[extCode];
-        if (!ext) return res.status(400).send('Invalid image format');
+        if (!ext) return res.status(400).send('Bad extension');
 
-        const baseName = `${chapter}p${page}`;
-        const filename = `${baseName}${ext}`;
+        const base = chapterPart
+            ? `${chapterPart.replace('/', '')}p${page}`
+            : `p${page}`;
 
-        const url = `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${filename}`;
+        const filename = `${base}${ext}`;
+
+        const url =
+            `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${filename}`;
 
         const response = await fetch(url);
 
