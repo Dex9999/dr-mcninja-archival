@@ -17,50 +17,48 @@ const fetch = (...args) =>
 */
 
 const EXTENSIONS = ['.png', '.jpg', '.gif'];
+const COMIC_MANIFEST_PATH = path.join(__dirname, 'archives.json');
 
 /*
 |--------------------------------------------------------------------------
-| COMIC LOADER (DYNAMIC)
+| COMIC LOADER (FROM JSON MANIFEST)
 |--------------------------------------------------------------------------
 */
 
 function loadComics() {
-    const dir = path.join(__dirname, 'archives');
-
-    if (!fs.existsSync(dir)) {
-        console.error('Archives folder not found!');
+    if (!fs.existsSync(COMIC_MANIFEST_PATH)) {
+        console.error('archives.json not found!');
         return [];
     }
 
-    const files = fs.readdirSync(dir);
+    const raw = fs.readFileSync(COMIC_MANIFEST_PATH, 'utf-8');
+    const files = JSON.parse(raw);
 
     return files
-        .filter(file => EXTENSIONS.includes(path.extname(file).toLowerCase()))
         .map(file => {
-            const name = path.parse(file).name;
+            const name = path.parse(file.name).name;
 
             // Matches:
             // 15p12 → chapter 15, page 12
             // 0p3   → chapter 0, page 3
-            // p12   → no chapter, page 12
+            // p12   → page 12
             const match = name.match(/^(?:(\d+))?p(\d+)$/i);
 
             return {
                 raw: name,
+                file: file.name,
+                size: file.size,
                 chapter: match?.[1] ? Number(match[1]) : null,
                 page: match ? Number(match[2]) : Number(name) || 0
             };
         })
         .sort((a, b) => {
-
-            // chapter sort (null chapters go last)
             if (a.chapter !== b.chapter) {
                 if (a.chapter === null) return 1;
                 if (b.chapter === null) return -1;
                 return a.chapter - b.chapter;
             }
 
-            // page sort
             return a.page - b.page;
         })
         .map(c => c.raw);
@@ -71,7 +69,7 @@ let comics = loadComics();
 
 /*
 |--------------------------------------------------------------------------
-| OPTIONAL AUTO REFRESH (DEV FRIENDLY)
+| OPTIONAL AUTO REFRESH
 |--------------------------------------------------------------------------
 */
 
@@ -158,7 +156,6 @@ a {
 */
 
 app.get('/comic/:id', (req, res) => {
-
     const comicId = req.params.id;
     const index = comics.indexOf(comicId);
 
@@ -222,14 +219,14 @@ img {
 
     ${
         prev
-        ? `<a class="nav" href="/comic/${prev}">← Prev</a>`
-        : `<span class="nav disabled">← Prev</span>`
+            ? `<a class="nav" href="/comic/${prev}">← Prev</a>`
+            : `<span class="nav disabled">← Prev</span>`
     }
 
     ${
         next
-        ? `<a class="nav" href="/comic/${next}">Next →</a>`
-        : `<span class="nav disabled">Next →</span>`
+            ? `<a class="nav" href="/comic/${next}">Next →</a>`
+            : `<span class="nav disabled">Next →</span>`
     }
 </div>
 
@@ -244,32 +241,29 @@ img {
 
 /*
 |--------------------------------------------------------------------------
-| IMAGE PROXY (GitHub fallback loader)
+| IMAGE PROXY (GitHub RAW loader)
 |--------------------------------------------------------------------------
 */
 
 app.get('/archives/comic/:filename', async (req, res) => {
-
     try {
-        const base = req.params.filename;
+        const filename = req.params.filename;
 
-        for (const ext of EXTENSIONS) {
+        const url = `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${filename}`;
 
-            const url = `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${base}${ext}`;
+        const response = await fetch(url);
 
-            const response = await fetch(url);
-
-            if (response.ok) {
-
-                const arrayBuffer = await response.arrayBuffer();
-                const buffer = Buffer.from(arrayBuffer);
-
-                res.setHeader('Content-Type', getContentType(ext));
-                return res.send(buffer);
-            }
+        if (!response.ok) {
+            return res.status(404).send('Image not found');
         }
 
-        res.status(404).send('Image not found');
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        const ext = path.extname(filename).toLowerCase();
+        res.setHeader('Content-Type', getContentType(ext));
+
+        return res.send(buffer);
 
     } catch (err) {
         console.error(err);
