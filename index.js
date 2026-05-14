@@ -25,24 +25,21 @@ const EXT_MAP = {
     '.gif': 'g'
 };
 
-const EXT_PRIORITY = { j: 0, p: 1, g: 2 };
-
 const EXT_MAP_REVERSE = {
     j: '.jpg',
     p: '.png',
     g: '.gif'
 };
 
+const EXT_PRIORITY = { j: 0, p: 1, g: 2 };
+
 /*
 |--------------------------------------------------------------------------
 | LOAD + ORDER COMICS
 |--------------------------------------------------------------------------
 | ORDER RULES:
-| 1) legacy format FIRST: 0p1, 0p2, p1, p2 (no extensions in id)
-| 2) then extension variants sorted by ext priority: jpg -> png -> gif
-| 3) final URL format:
-|    legacy: /comic/1
-|    variant: /comic/1j, /comic/1p, /comic/1g
+| 1) LEGACY GROUP FIRST (p-only naming): 1j,2j,3j... then 1p,2p,3p...
+| 2) THEN chapter/page variants: 0/1j etc
 |--------------------------------------------------------------------------
 */
 
@@ -54,8 +51,8 @@ function loadComics() {
 
     const files = JSON.parse(fs.readFileSync(COMIC_MANIFEST_PATH, 'utf-8'));
 
-    const pages = new Map();
-    const legacySet = new Set();
+    const legacy = new Map(); // page -> Set(ext)
+    const chaptered = new Map(); // "c/p" -> Set(ext)
 
     for (const f of files) {
         const parsed = path.parse(f.name);
@@ -68,82 +65,80 @@ function loadComics() {
         const chapter = match?.[1] ? Number(match[1]) : null;
         const page = Number(match[2]);
 
-        const key = chapter === null ? `p/${page}` : `${chapter}/${page}`;
+        const code = EXT_MAP[ext];
+        if (!code) continue;
 
-        if (!pages.has(key)) {
-            pages.set(key, {
-                chapter: chapter ?? -1,
-                page,
-                variants: new Set()
-            });
+        /*
+        |--------------------------------------------------------------------------
+        | LEGACY (no chapter)
+        |--------------------------------------------------------------------------
+        */
+        if (chapter === null) {
+            if (!legacy.has(page)) legacy.set(page, new Set());
+            legacy.get(page).add(code);
+            continue;
         }
 
-        const code = EXT_MAP[ext];
-        if (code) pages.get(key).variants.add(code);
+        /*
+        |--------------------------------------------------------------------------
+        | CHAPTERED
+        |--------------------------------------------------------------------------
+        */
+        const key = `${chapter}/${page}`;
+        if (!chaptered.has(key)) chaptered.set(key, new Set());
+        chaptered.get(key).add(code);
+    }
 
-        // detect legacy preference (original format existence)
-        if (chapter === null) {
-            legacySet.add(page);
+    const output = [];
+
+    /*
+    |--------------------------------------------------------------------------
+    | 1) LEGACY SORTED:
+    |    ALL JPG FIRST, THEN PNG, THEN GIF
+    |    BUT WITHIN EACH: 1,2,3,4...
+    |--------------------------------------------------------------------------
+    */
+
+    const legacyPages = [...legacy.entries()]
+        .map(([page, variants]) => ({
+            page,
+            variants: [...variants].sort((a, b) => EXT_PRIORITY[a] - EXT_PRIORITY[b])
+        }))
+        .sort((a, b) => a.page - b.page);
+
+    for (const p of legacyPages) {
+        for (const v of p.variants) {
+            output.push(`${p.page}${v}`); // 1j, 1p, 1g
         }
     }
 
-    const sorted = [...pages.entries()]
-        .map(([key, v]) => ({
-            key,
-            chapter: v.chapter,
-            page: v.page,
-            variants: [...v.variants]
-        }))
+    /*
+    |--------------------------------------------------------------------------
+    | 2) CHAPTERED SORTED
+    |--------------------------------------------------------------------------
+    */
+
+    const chapterPages = [...chaptered.entries()]
+        .map(([key, variants]) => {
+            const [c, p] = key.split('/').map(Number);
+            return {
+                chapter: c,
+                page: p,
+                variants: [...variants].sort((a, b) => EXT_PRIORITY[a] - EXT_PRIORITY[b])
+            };
+        })
         .sort((a, b) => {
             if (a.chapter !== b.chapter) return a.chapter - b.chapter;
             return a.page - b.page;
         });
 
-    const output = [];
-
-    for (const p of sorted) {
-        const legacy = p.chapter === -1;
-
-        /*
-        |--------------------------------------------------------------------------
-        | 1) LEGACY FIRST
-        |--------------------------------------------------------------------------
-        */
-
-        if (legacy) {
-            output.push({
-                type: 'legacy',
-                id: `${p.page}`, // /1 /2 /3
-                chapter: null,
-                page: p.page
-            });
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | 2) VARIANT FILES (sorted by extension priority)
-        |--------------------------------------------------------------------------
-        */
-
-        const sortedVariants = p.variants.sort(
-            (a, b) => EXT_PRIORITY[a] - EXT_PRIORITY[b]
-        );
-
-        for (const v of sortedVariants) {
-            const baseId = legacy
-                ? `${p.page}${v}`          // /1j /1p /1g
-                : `${p.chapter}/${p.page}${v}`;
-
-            output.push({
-                type: 'variant',
-                id: baseId,
-                chapter: p.chapter === -1 ? null : p.chapter,
-                page: p.page
-            });
+    for (const p of chapterPages) {
+        for (const v of p.variants) {
+            output.push(`${p.chapter}/${p.page}${v}`);
         }
     }
 
-    return output.map(x => x.id);
+    return output;
 }
 
 let comics = loadComics();
@@ -195,26 +190,13 @@ ${comics.map(c => `<a class="comic-link" href="/comic/${c}">${c}</a>`).join('')}
 |--------------------------------------------------------------------------
 | ROUTE
 |--------------------------------------------------------------------------
-| supports:
-| /1j  (legacy page variants)
-| /0/1j (chapter/page variants)
-|--------------------------------------------------------------------------
 */
 
 app.get('/comic/:a/:b?', (req, res) => {
-    let id;
-
-    if (!req.params.b) {
-        id = req.params.a; // /1j or /1
-    } else {
-        id = `${req.params.a}/${req.params.b}`;
-    }
+    const id = req.params.b ? `${req.params.a}/${req.params.b}` : req.params.a;
 
     const index = comics.indexOf(id);
-
-    if (index === -1) {
-        return res.status(404).send('Comic not found');
-    }
+    if (index === -1) return res.status(404).send('Comic not found');
 
     const prev = index > 0 ? comics[index - 1] : null;
     const next = index < comics.length - 1 ? comics[index + 1] : null;
@@ -262,11 +244,10 @@ app.get('/archives/comic/:id', async (req, res) => {
     try {
         const id = req.params.id;
 
-        // /1j OR /0/1j
         const match = id.match(/^(\d+\/)?(\d+)([jpgpnggif])$/i);
         if (!match) return res.status(400).send('Invalid id');
 
-        const chapterPart = match[1]; // optional "0/"
+        const chapterPart = match[1];
         const page = match[2];
         const extCode = match[3];
 
@@ -282,10 +263,7 @@ app.get('/archives/comic/:id', async (req, res) => {
             `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${filename}`;
 
         const response = await fetch(url);
-
-        if (!response.ok) {
-            return res.status(404).send('Image not found');
-        }
+        if (!response.ok) return res.status(404).send('Image not found');
 
         const buffer = Buffer.from(await response.arrayBuffer());
 
