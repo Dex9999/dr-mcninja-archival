@@ -218,7 +218,7 @@ app.get('/', (req, res) => {
 <!DOCTYPE html>
 <html>
 <head>
-<title>Comic Archive</title>
+<title>Dr. McNinja Comics</title>
 
 <style>
 body {
@@ -295,21 +295,19 @@ body {
 <body>
 
 <div class="hero">
-    <div class="title">📚 Comic Archive</div>
-    <div class="subtitle">Manga-style reader</div>
-    <a class="start" href="/comic/${comics[0]}">Start Reading →</a>
+    <div class="title">Dr. McNinja Comics</div>
+    <a class="start" href="/comic/${comics[0]}">Start →</a>
 </div>
 
 <div class="container">
 
 <!-- ================= MAIN J ================= -->
 <div class="section">
-    <div class="section-title">Main — Part 1 (J)</div>
+    <div class="section-title">Part 1</div>
     <div class="grid">
         ${main.j.sort(sortMain).map(p => `
             <a class="card" href="/comic/${p.id}">
                 <div>${p.chapter}/${p.page}</div>
-                <div class="small">j</div>
             </a>
         `).join('')}
     </div>
@@ -317,12 +315,11 @@ body {
 
 <!-- ================= MAIN P ================= -->
 <div class="section">
-    <div class="section-title">Main — Part 2 (P)</div>
+    <div class="section-title">Part 2</div>
     <div class="grid">
         ${main.p.sort(sortMain).map(p => `
             <a class="card" href="/comic/${p.id}">
                 <div>${p.chapter}/${p.page}</div>
-                <div class="small">p</div>
             </a>
         `).join('')}
     </div>
@@ -330,12 +327,11 @@ body {
 
 <!-- ================= MAIN G ================= -->
 <div class="section">
-    <div class="section-title">Main — Part 3 (G)</div>
+    <div class="section-title">Part 3</div>
     <div class="grid">
         ${main.g.sort(sortMain).map(p => `
             <a class="card" href="/comic/${p.id}">
                 <div>${p.chapter}/${p.page}</div>
-                <div class="small">g</div>
             </a>
         `).join('')}
     </div>
@@ -343,12 +339,11 @@ body {
 
 <!-- ================= SPECIAL J ================= -->
 <div class="section">
-    <div class="section-title">Special — J</div>
+    <div class="section-title">Special 1</div>
     <div class="grid">
         ${special.j.sort(sortSpecial).map(p => `
             <a class="card" href="/comic/${p.id}">
                 <div>${p.page}</div>
-                <div class="small">j</div>
             </a>
         `).join('')}
     </div>
@@ -356,12 +351,11 @@ body {
 
 <!-- ================= SPECIAL P ================= -->
 <div class="section">
-    <div class="section-title">Special — P</div>
+    <div class="section-title">Special 2</div>
     <div class="grid">
         ${special.p.sort(sortSpecial).map(p => `
             <a class="card" href="/comic/${p.id}">
                 <div>${p.page}</div>
-                <div class="small">p</div>
             </a>
         `).join('')}
     </div>
@@ -369,12 +363,11 @@ body {
 
 <!-- ================= SPECIAL G ================= -->
 <div class="section">
-    <div class="section-title">Special — G</div>
+    <div class="section-title">Special 3</div>
     <div class="grid">
         ${special.g.sort(sortSpecial).map(p => `
             <a class="card" href="/comic/${p.id}">
                 <div>${p.page}</div>
-                <div class="small">g</div>
             </a>
         `).join('')}
     </div>
