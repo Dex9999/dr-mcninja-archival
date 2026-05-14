@@ -143,8 +143,25 @@ app.get('/', (req, res) => {
         return res.send('<h1 style="color:white;background:#111;margin:0;padding:40px;">No comics found</h1>');
     }
 
-    const main = new Map();     // chapter/page/ext
-    const special = new Map();  // page/ext only
+    const main = {
+        j: [],
+        p: [],
+        g: []
+    };
+
+    const special = {
+        j: [],
+        p: [],
+        g: []
+    };
+
+    const extOrder = { j: 0, p: 1, g: 2 };
+
+    /*
+    |--------------------------------------------------------------------------
+    | SPLIT DATA
+    |--------------------------------------------------------------------------
+    */
 
     for (const c of comics) {
 
@@ -155,10 +172,11 @@ app.get('/', (req, res) => {
             const page = Number(mainMatch[2]);
             const ext = mainMatch[3];
 
-            const key = `${chapter}/${page}`;
-
-            if (!main.has(key)) main.set(key, []);
-            main.get(key).push({ id: c, page, ext, chapter });
+            main[ext].push({
+                id: c,
+                chapter,
+                page
+            });
 
             continue;
         }
@@ -169,22 +187,38 @@ app.get('/', (req, res) => {
             const page = Number(specialMatch[1]);
             const ext = specialMatch[2];
 
-            const key = page;
-
-            if (!special.has(key)) special.set(key, []);
-            special.get(key).push({ id: c, page, ext });
+            special[ext].push({
+                id: c,
+                page
+            });
 
             continue;
         }
     }
 
-    const extOrder = { j: 0, p: 1, g: 2 };
+    /*
+    |--------------------------------------------------------------------------
+    | SORT HELPERS
+    |--------------------------------------------------------------------------
+    */
+
+    const sortMain = (a, b) =>
+        a.chapter - b.chapter || a.page - b.page;
+
+    const sortSpecial = (a, b) =>
+        a.page - b.page;
+
+    /*
+    |--------------------------------------------------------------------------
+    | RENDER
+    |--------------------------------------------------------------------------
+    */
 
     res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-<title>Dr McNinja Comics</title>
+<title>Comic Archive</title>
 
 <style>
 body {
@@ -195,8 +229,8 @@ body {
 }
 
 .hero {
-    padding: 50px 20px 20px;
     text-align: center;
+    padding: 50px 20px 20px;
 }
 
 .title { font-size: 40px; font-weight: 700; }
@@ -204,7 +238,7 @@ body {
 
 .start {
     display: inline-block;
-    margin-top: 16px;
+    margin-top: 12px;
     padding: 12px 18px;
     background: #7c5cff;
     border-radius: 10px;
@@ -213,7 +247,7 @@ body {
 }
 
 .container {
-    max-width: 1000px;
+    max-width: 1100px;
     margin: auto;
     padding: 20px;
 }
@@ -223,9 +257,9 @@ body {
 }
 
 .section-title {
-    font-size: 18px;
-    opacity: 0.8;
+    font-size: 20px;
     margin-bottom: 10px;
+    opacity: 0.85;
 }
 
 .grid {
@@ -246,11 +280,14 @@ body {
 }
 
 .card:hover {
-    transform: translateY(-2px);
     background: rgba(255,255,255,0.12);
+    transform: translateY(-2px);
 }
 
-.small { font-size: 11px; opacity: 0.5; }
+.small {
+    font-size: 11px;
+    opacity: 0.5;
+}
 </style>
 
 </head>
@@ -258,48 +295,88 @@ body {
 <body>
 
 <div class="hero">
-    <div class="title">Dr McNinja Comics</div>
-    <div class="subtitle">Archived and easier to read</div>
-    <a class="start" href="/comic/${comics[0]}">Dive In →</a>
+    <div class="title">📚 Comic Archive</div>
+    <div class="subtitle">Manga-style reader</div>
+    <a class="start" href="/comic/${comics[0]}">Start Reading →</a>
 </div>
 
 <div class="container">
 
-<!-- ================= MAIN ================= -->
+<!-- ================= MAIN J ================= -->
 <div class="section">
-    <div class="section-title">Main Series</div>
+    <div class="section-title">Main — Part 1 (J)</div>
     <div class="grid">
-        ${
-            [...main.entries()]
-                .map(([_, arr]) => arr)
-                .flat()
-                .sort((a,b) => a.chapter - b.chapter || a.page - b.page || extOrder[a.ext] - extOrder[b.ext])
-                .map(p => `
-                    <a class="card" href="/comic/${p.id}">
-                        <div>${p.chapter}/${p.page}</div>
-                        <div class="small">${p.ext}</div>
-                    </a>
-                `).join('')
-        }
+        ${main.j.sort(sortMain).map(p => `
+            <a class="card" href="/comic/${p.id}">
+                <div>${p.chapter}/${p.page}</div>
+                <div class="small">j</div>
+            </a>
+        `).join('')}
     </div>
 </div>
 
-<!-- ================= SPECIAL ================= -->
+<!-- ================= MAIN P ================= -->
 <div class="section">
-    <div class="section-title">Special Pages</div>
+    <div class="section-title">Main — Part 2 (P)</div>
     <div class="grid">
-        ${
-            [...special.entries()]
-                .map(([_, arr]) => arr)
-                .flat()
-                .sort((a,b) => a.page - b.page || extOrder[a.ext] - extOrder[b.ext])
-                .map(p => `
-                    <a class="card" href="/comic/${p.id}">
-                        <div>${p.page}</div>
-                        <div class="small">${p.ext}</div>
-                    </a>
-                `).join('')
-        }
+        ${main.p.sort(sortMain).map(p => `
+            <a class="card" href="/comic/${p.id}">
+                <div>${p.chapter}/${p.page}</div>
+                <div class="small">p</div>
+            </a>
+        `).join('')}
+    </div>
+</div>
+
+<!-- ================= MAIN G ================= -->
+<div class="section">
+    <div class="section-title">Main — Part 3 (G)</div>
+    <div class="grid">
+        ${main.g.sort(sortMain).map(p => `
+            <a class="card" href="/comic/${p.id}">
+                <div>${p.chapter}/${p.page}</div>
+                <div class="small">g</div>
+            </a>
+        `).join('')}
+    </div>
+</div>
+
+<!-- ================= SPECIAL J ================= -->
+<div class="section">
+    <div class="section-title">Special — J</div>
+    <div class="grid">
+        ${special.j.sort(sortSpecial).map(p => `
+            <a class="card" href="/comic/${p.id}">
+                <div>${p.page}</div>
+                <div class="small">j</div>
+            </a>
+        `).join('')}
+    </div>
+</div>
+
+<!-- ================= SPECIAL P ================= -->
+<div class="section">
+    <div class="section-title">Special — P</div>
+    <div class="grid">
+        ${special.p.sort(sortSpecial).map(p => `
+            <a class="card" href="/comic/${p.id}">
+                <div>${p.page}</div>
+                <div class="small">p</div>
+            </a>
+        `).join('')}
+    </div>
+</div>
+
+<!-- ================= SPECIAL G ================= -->
+<div class="section">
+    <div class="section-title">Special — G</div>
+    <div class="grid">
+        ${special.g.sort(sortSpecial).map(p => `
+            <a class="card" href="/comic/${p.id}">
+                <div>${p.page}</div>
+                <div class="small">g</div>
+            </a>
+        `).join('')}
     </div>
 </div>
 
