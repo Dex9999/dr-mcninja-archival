@@ -25,8 +25,6 @@ const EXT_MAP = {
     '.gif': 'g'
 };
 
-const EXT_PRIORITY = { j: 0, g: 1, p: 2 };
-
 const EXT_MAP_REVERSE = {
     j: '.jpg',
     p: '.png',
@@ -35,7 +33,7 @@ const EXT_MAP_REVERSE = {
 
 /*
 |--------------------------------------------------------------------------
-| LOAD DATA
+| LOAD COMICS (FLAT INDEX)
 |--------------------------------------------------------------------------
 */
 
@@ -47,8 +45,7 @@ function loadComics() {
 
     const files = JSON.parse(fs.readFileSync(COMIC_MANIFEST_PATH, 'utf-8'));
 
-    const main = new Map();   // chapter/page
-    const special = new Map(); // page only (no chapter)
+    const pages = [];
 
     for (const f of files) {
         const parsed = path.parse(f.name);
@@ -58,7 +55,7 @@ function loadComics() {
         const match = base.match(/^(?:(\d+))?p(\d+)$/i);
         if (!match) continue;
 
-        const chapter = match?.[1] ? Number(match[1]) : null;
+        const chapter = match[1] ? Number(match[1]) : null;
         const page = Number(match[2]);
 
         const code = EXT_MAP[ext];
@@ -66,74 +63,38 @@ function loadComics() {
 
         /*
         |--------------------------------------------------------------------------
-        | MAIN SERIES (chapter exists)
+        | FULL UNIQUE ENTRY
         |--------------------------------------------------------------------------
         */
-        if (chapter !== null) {
-            const key = `${chapter}/${page}`;
-            if (!main.has(key)) main.set(key, { chapter, page, variants: new Set() });
-            main.get(key).variants.add(code);
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | SPECIAL SERIES (NO CHAPTER)
-        |--------------------------------------------------------------------------
-        */
-        else {
-            const key = page;
-            if (!special.has(key)) special.set(key, new Set());
-            special.get(key).add(code);
-        }
-    }
-
-    const output = [];
-
-    /*
-    |--------------------------------------------------------------------------
-    | 1) MAIN SERIES: /0/1, /0/2 ...
-    |--------------------------------------------------------------------------
-    */
-
-    const mainPages = [...main.entries()]
-        .map(([key, v]) => ({
-            key,
-            chapter: v.chapter,
-            page: v.page
-        }))
-        .sort((a, b) => {
-            if (a.chapter !== b.chapter) return a.chapter - b.chapter;
-            return a.page - b.page;
-        });
-
-    for (const p of mainPages) {
-        output.push(`${p.key}`); // /0/1 (no extension)
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | 2) SPECIAL SERIES GROUPED BY EXTENSION ORDER
-    |--------------------------------------------------------------------------
-    */
-
-    const specialPages = [...special.entries()]
-        .map(([page, variants]) => ({
+        pages.push({
+            chapter: chapter ?? 0,
             page,
-            variants: [...variants]
-        }))
-        .sort((a, b) => a.page - b.page);
-
-    const extOrder = ['j', 'g', 'p'];
-
-    for (const ext of extOrder) {
-        for (const p of specialPages) {
-            if (p.variants.includes(ext)) {
-                output.push(`${p.page}${ext}`); // /1j /2j etc
-            }
-        }
+            ext: code,
+            id: chapter === null
+                ? `${page}${code}`     // /1j
+                : `${chapter}/${page}${code}` // /0/1j
+        });
     }
 
-    return output;
+    /*
+    |--------------------------------------------------------------------------
+    | SORTING RULE
+    |--------------------------------------------------------------------------
+    | 1. chapter asc
+    | 2. page asc
+    | 3. extension asc (j → p → g)
+    |--------------------------------------------------------------------------
+    */
+
+    pages.sort((a, b) => {
+        if (a.chapter !== b.chapter) return a.chapter - b.chapter;
+        if (a.page !== b.page) return a.page - b.page;
+
+        const order = { j: 0, p: 1, g: 2 };
+        return order[a.ext] - order[b.ext];
+    });
+
+    return pages.map(p => p.id);
 }
 
 let comics = loadComics();
@@ -196,8 +157,6 @@ app.get('/comic/:a/:b?', (req, res) => {
     const prev = index > 0 ? comics[index - 1] : null;
     const next = index < comics.length - 1 ? comics[index + 1] : null;
 
-    const toUrl = (x) => `/comic/${x}`;
-
     res.send(`
 <!DOCTYPE html>
 <html>
@@ -216,8 +175,8 @@ img { max-width:95%; margin-top:20px; border-radius:8px; box-shadow:0 0 20px rgb
 <div class="topbar">
 <a class="nav" href="/">Home</a>
 
-${prev ? `<a class="nav" href="${toUrl(prev)}">← Prev</a>` : `<span class="nav disabled">← Prev</span>`}
-${next ? `<a class="nav" href="${toUrl(next)}">Next →</a>` : `<span class="nav disabled">Next →</span>`}
+${prev ? `<a class="nav" href="/comic/${prev}">← Prev</a>` : `<span class="nav disabled">← Prev</span>`}
+${next ? `<a class="nav" href="/comic/${next}">Next →</a>` : `<span class="nav disabled">Next →</span>`}
 </div>
 
 <img src="/archives/comic/${id}" />
@@ -231,55 +190,48 @@ ${next ? `<a class="nav" href="${toUrl(next)}">Next →</a>` : `<span class="nav
 
 /*
 |--------------------------------------------------------------------------
-| IMAGE PROXY (ALWAYS INCLUDE EXTENSION)
+| IMAGE PROXY (NO FALLBACKS, EXACT MATCH ONLY)
 |--------------------------------------------------------------------------
 */
 
-app.get('/archives/comic/:id', async (req, res) => {
+app.get('/archives/comic/:a/:b?', async (req, res) => {
     try {
-        const id = req.params.id;
+        const id = req.params.b ? `${req.params.a}/${req.params.b}` : req.params.a;
 
         /*
         |--------------------------------------------------------------------------
-        | MAIN SERIES: /0/1
+        | MAIN SERIES: /0/1j
         |--------------------------------------------------------------------------
         */
-        const main = id.match(/^(\d+)\/(\d+)$/);
+        const main = id.match(/^(\d+)\/(\d+)([jpgpnggif])$/);
         if (main) {
             const chapter = main[1];
             const page = main[2];
+            const ext = EXT_MAP_REVERSE[main[3]];
 
-            // try best available format
-            const tryExts = ['.jpg','.png', '.gif'];
+            const filename = `${chapter}p${page}${ext}`;
 
-            for (const ext of tryExts) {
-                const filename = `${chapter}p${page}${ext}`;
+            const url =
+                `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${filename}`;
 
-                const url =
-                    `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${filename}`;
+            const response = await fetch(url);
+            if (!response.ok) return res.status(404).send('Image not found');
 
-                const response = await fetch(url);
-                if (response.ok) {
-                    const buffer = Buffer.from(await response.arrayBuffer());
-                    res.setHeader('Content-Type', getContentType(ext));
-                    return res.send(buffer);
-                }
-            }
-
-            return res.status(404).send('Image not found');
+            const buffer = Buffer.from(await response.arrayBuffer());
+            res.setHeader('Content-Type', getContentType(ext));
+            return res.send(buffer);
         }
 
         /*
         |--------------------------------------------------------------------------
-        | SPECIAL SERIES: /1j /2g etc
+        | SPECIAL SERIES: /1j
         |--------------------------------------------------------------------------
         */
         const special = id.match(/^(\d+)([jpgpnggif])$/);
         if (special) {
             const page = special[1];
-            const extCode = special[2];
+            const ext = EXT_MAP_REVERSE[special[2]];
 
-            const ext = EXT_MAP_REVERSE[extCode];
             const filename = `p${page}${ext}`;
 
             const url =
@@ -289,7 +241,6 @@ app.get('/archives/comic/:id', async (req, res) => {
             if (!response.ok) return res.status(404).send('Image not found');
 
             const buffer = Buffer.from(await response.arrayBuffer());
-
             res.setHeader('Content-Type', getContentType(ext));
             return res.send(buffer);
         }
