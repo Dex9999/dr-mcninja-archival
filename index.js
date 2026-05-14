@@ -2,60 +2,300 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 
-const app = express();
 require('dotenv').config();
-const fetch = (...args) =>
-    import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
+const app = express();
 const port = process.env.PORT || 5000;
-  
+
+/*
+|--------------------------------------------------------------------------
+| CONFIG
+|--------------------------------------------------------------------------
+*/
+
+const EXTENSIONS = ['.png', '.jpg', '.gif'];
+
+/*
+|--------------------------------------------------------------------------
+| COMIC LOADER (DYNAMIC)
+|--------------------------------------------------------------------------
+*/
+
+function loadComics() {
+    const dir = path.join(__dirname, 'archives');
+
+    if (!fs.existsSync(dir)) {
+        console.error('Archives folder not found!');
+        return [];
+    }
+
+    const files = fs.readdirSync(dir);
+
+    return files
+        .filter(file => EXTENSIONS.includes(path.extname(file).toLowerCase()))
+        .map(file => {
+            const name = path.parse(file).name;
+
+            // Matches:
+            // 15p12 → chapter 15, page 12
+            // 0p3   → chapter 0, page 3
+            // p12   → no chapter, page 12
+            const match = name.match(/^(?:(\d+))?p(\d+)$/i);
+
+            return {
+                raw: name,
+                chapter: match?.[1] ? Number(match[1]) : null,
+                page: match ? Number(match[2]) : Number(name) || 0
+            };
+        })
+        .sort((a, b) => {
+
+            // chapter sort (null chapters go last)
+            if (a.chapter !== b.chapter) {
+                if (a.chapter === null) return 1;
+                if (b.chapter === null) return -1;
+                return a.chapter - b.chapter;
+            }
+
+            // page sort
+            return a.page - b.page;
+        })
+        .map(c => c.raw);
+}
+
+// initial load
+let comics = loadComics();
+
+/*
+|--------------------------------------------------------------------------
+| OPTIONAL AUTO REFRESH (DEV FRIENDLY)
+|--------------------------------------------------------------------------
+*/
+
+setInterval(() => {
+    comics = loadComics();
+}, 60 * 1000);
+
+/*
+|--------------------------------------------------------------------------
+| HOME PAGE
+|--------------------------------------------------------------------------
+*/
+
+app.get('/', (req, res) => {
+    if (comics.length === 0) {
+        return res.send('<h1>No comics found</h1>');
+    }
+
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+<title>Comic Archive</title>
+<style>
+body {
+    margin: 0;
+    background: #111;
+    color: white;
+    font-family: Arial;
+    text-align: center;
+}
+
+.container {
+    padding: 60px 20px;
+}
+
+a {
+    color: white;
+    text-decoration: none;
+}
+
+.button {
+    display: inline-block;
+    padding: 14px 22px;
+    background: #333;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+
+.comic-link {
+    display: inline-block;
+    margin: 6px;
+    padding: 10px 12px;
+    background: #222;
+    border-radius: 6px;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+    <h1>Comic Archive</h1>
+    <p>Dynamic comic reader</p>
+
+    <a class="button" href="/comic/${comics[0]}">Start Reading</a>
+
+    <div style="margin-top:40px;">
+        ${comics.map(c => `
+            <a class="comic-link" href="/comic/${c}">${c}</a>
+        `).join('')}
+    </div>
+
+</div>
+</body>
+</html>
+    `);
+});
+
+/*
+|--------------------------------------------------------------------------
+| COMIC READER
+|--------------------------------------------------------------------------
+*/
+
+app.get('/comic/:id', (req, res) => {
+
+    const comicId = req.params.id;
+    const index = comics.indexOf(comicId);
+
+    if (index === -1) {
+        return res.status(404).send('Comic not found');
+    }
+
+    const prev = index > 0 ? comics[index - 1] : null;
+    const next = index < comics.length - 1 ? comics[index + 1] : null;
+
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+<title>${comicId}</title>
+<style>
+body {
+    margin: 0;
+    background: #111;
+    color: white;
+    font-family: Arial;
+    text-align: center;
+}
+
+.topbar {
+    position: sticky;
+    top: 0;
+    background: #1b1b1b;
+    padding: 14px;
+    border-bottom: 1px solid #333;
+}
+
+.nav {
+    display: inline-block;
+    margin: 0 6px;
+    padding: 8px 14px;
+    background: #333;
+    border-radius: 6px;
+    color: white;
+    text-decoration: none;
+}
+
+.disabled {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+img {
+    max-width: 95%;
+    margin-top: 20px;
+    border-radius: 8px;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+}
+</style>
+</head>
+
+<body>
+
+<div class="topbar">
+    <a class="nav" href="/">Home</a>
+
+    ${
+        prev
+        ? `<a class="nav" href="/comic/${prev}">← Prev</a>`
+        : `<span class="nav disabled">← Prev</span>`
+    }
+
+    ${
+        next
+        ? `<a class="nav" href="/comic/${next}">Next →</a>`
+        : `<span class="nav disabled">Next →</span>`
+    }
+</div>
+
+<img src="/archives/comic/${comicId}" />
+
+<div style="margin:10px;color:#aaa;">${comicId}</div>
+
+</body>
+</html>
+    `);
+});
+
+/*
+|--------------------------------------------------------------------------
+| IMAGE PROXY (GitHub fallback loader)
+|--------------------------------------------------------------------------
+*/
+
 app.get('/archives/comic/:filename', async (req, res) => {
+
     try {
-        const extensions = ['.png', '.jpg', '.gif'];
+        const base = req.params.filename;
 
-        let matchingFile = null;
-        let foundResponse = null;
+        for (const ext of EXTENSIONS) {
 
-        for (const ext of extensions) {
-            const response = await fetch(
-                `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${req.params.filename}${ext}`
-            );
+            const url = `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${base}${ext}`;
+
+            const response = await fetch(url);
 
             if (response.ok) {
-                matchingFile = `${req.params.filename}${ext}`;
-                foundResponse = response;
-                break;
+
+                const arrayBuffer = await response.arrayBuffer();
+                const buffer = Buffer.from(arrayBuffer);
+
+                res.setHeader('Content-Type', getContentType(ext));
+                return res.send(buffer);
             }
         }
 
-        if (!matchingFile || !foundResponse) {
-            return res.status(404).send('File not found');
-        }
+        res.status(404).send('Image not found');
 
-        res.setHeader('Content-Type', getContentType(matchingFile));
-
-        foundResponse.body.pipe(res);
-
-    } catch (error) {
-        console.error('Error fetching file:', error);
+    } catch (err) {
+        console.error(err);
         res.status(500).send('Internal Server Error');
     }
 });
 
-function getContentType(filePath) {
-    const ext = path.extname(filePath).toLowerCase();
+/*
+|--------------------------------------------------------------------------
+| HELPERS
+|--------------------------------------------------------------------------
+*/
+
+function getContentType(ext) {
     switch (ext) {
-        case '.png':
-            return 'image/png';
-        case '.gif':
-            return 'image/gif';
+        case '.png': return 'image/png';
+        case '.gif': return 'image/gif';
         case '.jpg':
         case '.jpeg':
-        default:
-            return 'image/jpeg';
+        default: return 'image/jpeg';
     }
 }
 
+/*
+|--------------------------------------------------------------------------
+| START SERVER
+|--------------------------------------------------------------------------
+*/
+
 app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
+    console.log(`Server running on port ${port}`);
 });
