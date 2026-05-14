@@ -51,8 +51,9 @@ function loadComics() {
 
     const files = JSON.parse(fs.readFileSync(COMIC_MANIFEST_PATH, 'utf-8'));
 
-    const legacy = new Map();     // page -> Set(ext)
-    const chaptered = new Map();  // chapter/page -> Set(ext)
+    const map = new Map();
+    // key = "chapter/page"
+    // value = { chapter, page, variants:Set }
 
     for (const f of files) {
         const parsed = path.parse(f.name);
@@ -62,81 +63,63 @@ function loadComics() {
         const match = base.match(/^(?:(\d+))?p(\d+)$/i);
         if (!match) continue;
 
-        const chapter = match?.[1] ? Number(match[1]) : null;
+        const chapter = match?.[1] ? Number(match[1]) : 0;
         const page = Number(match[2]);
 
-        const code = EXT_MAP[ext];
-        if (!code) continue;
+        const key = `${chapter}/${page}`;
 
-        if (chapter === null) {
-            if (!legacy.has(page)) legacy.set(page, new Set());
-            legacy.get(page).add(code);
-        } else {
-            const key = `${chapter}/${page}`;
-            if (!chaptered.has(key)) chaptered.set(key, new Set());
-            chaptered.get(key).add(code);
+        if (!map.has(key)) {
+            map.set(key, {
+                chapter,
+                page,
+                variants: new Set()
+            });
         }
+
+        const code = EXT_MAP[ext];
+        if (code) map.get(key).variants.add(code);
     }
 
-    const output = [];
-
-    /*
-    |--------------------------------------------------------------------------
-    | 1) LEGACY: GROUP BY EXTENSION FIRST (THIS IS YOUR FIX)
-    |--------------------------------------------------------------------------
-    */
-
-    const legacyPages = [...legacy.entries()]
-        .map(([page, variants]) => ({
-            page,
-            variants: [...variants]
+    const pages = [...map.entries()]
+        .map(([key, v]) => ({
+            key,
+            chapter: v.chapter,
+            page: v.page,
+            variants: [...v.variants]
         }))
-        .sort((a, b) => a.page - b.page);
-
-    const pushByExtOrder = (ext) => {
-        for (const p of legacyPages) {
-            if (p.variants.includes(ext)) {
-                output.push(`${p.page}${ext}`);
-            }
-        }
-    };
-
-    // EXACT ORDER YOU WANTED:
-    pushByExtOrder('j'); // 1j 2j 3j ...
-    pushByExtOrder('p'); // 1p 2p 3p ...
-    pushByExtOrder('g'); // 1g 2g 3g ...
-
-    /*
-    |--------------------------------------------------------------------------
-    | 2) CHAPTERED (same logic but grouped correctly too)
-    |--------------------------------------------------------------------------
-    */
-
-    const chapterPages = [...chaptered.entries()]
-        .map(([key, variants]) => {
-            const [c, p] = key.split('/').map(Number);
-            return {
-                chapter: c,
-                page: p,
-                variants: [...variants]
-            };
-        })
         .sort((a, b) => {
             if (a.chapter !== b.chapter) return a.chapter - b.chapter;
             return a.page - b.page;
         });
 
-    const pushChapterByExt = (ext) => {
-        for (const p of chapterPages) {
+    const output = [];
+
+    /*
+    |--------------------------------------------------------------------------
+    | 1) REGULAR (NO EXTENSION) FIRST
+    |--------------------------------------------------------------------------
+    */
+
+    for (const p of pages) {
+        output.push(p.key); // "0/1", "0/2", ...
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | 2) SPECIALS (EXTENSIONS) AFTER
+    | ORDER: j → p → g
+    |--------------------------------------------------------------------------
+    */
+
+    const order = ['j', 'p', 'g'];
+
+    for (const ext of order) {
+        for (const p of pages) {
             if (p.variants.includes(ext)) {
-                output.push(`${p.chapter}/${p.page}${ext}`);
+                output.push(`${p.key}${ext}`); // "0/1j"
             }
         }
-    };
-
-    pushChapterByExt('j');
-    pushChapterByExt('p');
-    pushChapterByExt('g');
+    }
 
     return output;
 }
