@@ -141,34 +141,153 @@ setInterval(() => {
 app.get('/', (req, res) => {
     if (!comics.length) return res.send('<h1>No comics found</h1>');
 
+    app.get('/', (req, res) => {
+    if (!comics.length) return res.send('<h1 style="color:white;background:#111;margin:0;padding:40px;">No comics found</h1>');
+
+    // Group into chapters for cleaner display
+    const grouped = new Map();
+
+    for (const c of comics) {
+        const match = c.match(/^(\d+)\/(\d+)/);
+        if (!match) continue;
+
+        const chapter = match[1];
+
+        if (!grouped.has(chapter)) grouped.set(chapter, []);
+        grouped.get(chapter).push(c);
+    }
+
+    const chapters = [...grouped.entries()]
+        .sort((a, b) => Number(a[0]) - Number(b[0]));
+
     res.send(`
 <!DOCTYPE html>
 <html>
 <head>
 <title>Comic Archive</title>
+
 <style>
-body { margin:0; background:#111; color:white; font-family:Arial; text-align:center; }
-.container { padding:60px 20px; }
-a { color:white; text-decoration:none; }
-.button { display:inline-block; padding:14px 22px; background:#333; border-radius:8px; margin-top:20px; }
-.comic-link { display:inline-block; margin:6px; padding:10px 12px; background:#222; border-radius:6px; }
+body {
+    margin: 0;
+    background: #0b0b0f;
+    color: white;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+}
+
+/* ================= HERO ================= */
+.hero {
+    padding: 60px 20px 30px;
+    text-align: center;
+}
+
+.title {
+    font-size: 42px;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.subtitle {
+    opacity: 0.6;
+    margin-bottom: 20px;
+}
+
+.start {
+    display: inline-block;
+    padding: 14px 22px;
+    background: #7c5cff;
+    border-radius: 12px;
+    color: white;
+    text-decoration: none;
+    font-weight: 600;
+    transition: 0.15s;
+}
+
+.start:hover {
+    transform: scale(1.05);
+    background: #6a4df0;
+}
+
+/* ================= GRID ================= */
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.chapter {
+    margin-bottom: 30px;
+}
+
+.chapter-title {
+    font-size: 18px;
+    margin: 10px 0;
+    opacity: 0.8;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    gap: 10px;
+}
+
+.card {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 10px;
+    text-align: center;
+
+    text-decoration: none;
+    color: white;
+
+    transition: 0.15s;
+}
+
+.card:hover {
+    background: rgba(255,255,255,0.12);
+    transform: translateY(-2px);
+}
+
+.small {
+    font-size: 12px;
+    opacity: 0.6;
+}
 </style>
+
 </head>
+
 <body>
+
+<div class="hero">
+    <div class="title">📚 Comic Archive</div>
+    <div class="subtitle">Manga-style reader</div>
+
+    <a class="start" href="/comic/${comics[0]}">Start Reading →</a>
+</div>
+
 <div class="container">
 
-<h1>Comic Archive</h1>
+${chapters.map(([ch, pages]) => `
+    <div class="chapter">
+        <div class="chapter-title">Chapter ${ch}</div>
 
-<a class="button" href="/comic/${comics[0]}">Start Reading</a>
+        <div class="grid">
+            ${pages.map(p => `
+                <a class="card" href="/comic/${p}">
+                    <div>${p.split('/')[1] || p}</div>
+                    <div class="small">${p.split('/')[2] || ''}</div>
+                </a>
+            `).join('')}
+        </div>
+    </div>
+`).join('')}
 
-<div style="margin-top:40px;">
-${comics.map(c => `<a class="comic-link" href="/comic/${c}">${c}</a>`).join('')}
 </div>
 
-</div>
 </body>
 </html>
     `);
+});
 });
 
 /*
@@ -191,30 +310,146 @@ app.get('/comic/:a/:b?', (req, res) => {
 <html>
 <head>
 <title>${id}</title>
+
 <style>
-body { margin:0; background:#111; color:white; font-family:Arial; text-align:center; }
-.topbar { position:sticky; top:0; background:#1b1b1b; padding:14px; border-bottom:1px solid #333; }
-.nav { display:inline-block; margin:0 6px; padding:8px 14px; background:#333; border-radius:6px; color:white; text-decoration:none; }
-.disabled { opacity:0.4; pointer-events:none; }
-img { max-width:95%; margin-top:20px; border-radius:8px; box-shadow:0 0 20px rgba(0,0,0,0.5); }
+body {
+    margin: 0;
+    background: #0b0b0f;
+    color: white;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+}
+
+/* ===================== TOP BAR ===================== */
+.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(20,20,25,0.85);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    padding: 12px 16px;
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+
+    padding: 8px 12px;
+    border-radius: 10px;
+
+    background: rgba(255,255,255,0.06);
+    color: white;
+    text-decoration: none;
+
+    transition: 0.15s;
+}
+
+.nav:hover {
+    background: rgba(255,255,255,0.12);
+}
+
+.disabled {
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+/* ===================== READER ===================== */
+.reader {
+    display: flex;
+    justify-content: center;
+    padding: 24px 10px 60px;
+}
+
+.page {
+    max-width: 900px;
+    width: 100%;
+    text-align: center;
+}
+
+img {
+    width: 100%;
+    height: auto;
+    border-radius: 12px;
+
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+
+/* ===================== FOOT LABEL ===================== */
+.meta {
+    margin-top: 12px;
+    font-size: 12px;
+    color: rgba(255,255,255,0.5);
+}
+
+/* ===================== PAGE BADGE ===================== */
+.badge {
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    font-size: 12px;
+}
+
+/* ===================== HOME BUTTON ===================== */
+.homebtn {
+    font-weight: 500;
+}
 </style>
+
 </head>
+
 <body>
 
 <div class="topbar">
-<a class="nav" href="/">Home</a>
+    <a class="nav homebtn" href="/">← Library</a>
 
-${prev ? `<a class="nav" href="/comic/${prev}">← Prev</a>` : `<span class="nav disabled">← Prev</span>`}
-${next ? `<a class="nav" href="/comic/${next}">Next →</a>` : `<span class="nav disabled">Next →</span>`}
+    <div class="badge">${id}</div>
+
+    <div>
+        ${
+            prev
+                ? `<a class="nav" href="/comic/${prev}">← Prev</a>`
+                : `<span class="nav disabled">← Prev</span>`
+        }
+
+        ${
+            next
+                ? `<a class="nav" href="/comic/${next}">Next →</a>`
+                : `<span class="nav disabled">Next →</span>`
+        }
+    </div>
 </div>
 
-<img src="/archives/comic/${id}" />
+<div class="reader">
+    <div class="page">
+        <img src="/archives/comic/${id}" />
 
-<div style="margin:10px;color:#aaa;">${id}</div>
+        <div class="meta">
+            Use ← → arrow keys to navigate
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') {
+        const prev = ${JSON.stringify(prev)};
+        if (prev) window.location.href = '/comic/' + prev;
+    }
+    if (e.key === 'ArrowRight') {
+        const next = ${JSON.stringify(next)};
+        if (next) window.location.href = '/comic/' + next;
+    }
+});
+</script>
 
 </body>
 </html>
-    `);
+`);
 });
 
 /*
