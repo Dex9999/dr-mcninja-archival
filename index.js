@@ -45,7 +45,9 @@ function loadComics() {
 
     const files = JSON.parse(fs.readFileSync(COMIC_MANIFEST_PATH, 'utf-8'));
 
-    const pages = [];
+    const map = new Map();
+    // key = "chapter/page"
+    // value = Set(ext)
 
     for (const f of files) {
         const parsed = path.parse(f.name);
@@ -61,30 +63,64 @@ function loadComics() {
         const code = EXT_MAP[ext];
         if (!code) continue;
 
-        pages.push({
-            chapter,
-            page,
-            ext: code,
-            id: `${chapter}/${page}${code}`
-        });
+        const key = `${chapter}/${page}`;
+
+        if (!map.has(key)) {
+            map.set(key, new Set());
+        }
+
+        map.get(key).add(code);
     }
 
     /*
     |--------------------------------------------------------------------------
-    | FINAL SORT ORDER:
-    | chapter → extension → page
+    | BUILD CLEAN UNIQUE LIST
     |--------------------------------------------------------------------------
     */
 
-    const extOrder = { j: 0, p: 1, g: 2 };
+    const pages = [...map.entries()].map(([key, variants]) => {
+        const [chapter, page] = key.split('/').map(Number);
+
+        return {
+            chapter,
+            page,
+            variants: [...variants]
+        };
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | SORT BASE (CRITICAL FIX)
+    |--------------------------------------------------------------------------
+    | ONLY by chapter/page once
+    |--------------------------------------------------------------------------
+    */
 
     pages.sort((a, b) => {
         if (a.chapter !== b.chapter) return a.chapter - b.chapter;
-        if (a.ext !== b.ext) return extOrder[a.ext] - extOrder[b.ext];
         return a.page - b.page;
     });
 
-    return pages.map(p => p.id);
+    const extOrder = ['j', 'p', 'g'];
+
+    const output = [];
+
+    /*
+    |--------------------------------------------------------------------------
+    | EXPAND IN REQUIRED ORDER:
+    | ALL J → ALL P → ALL G
+    |--------------------------------------------------------------------------
+    */
+
+    for (const ext of extOrder) {
+        for (const p of pages) {
+            if (p.variants.includes(ext)) {
+                output.push(`${p.chapter}/${p.page}${ext}`);
+            }
+        }
+    }
+
+    return output;
 }
 
 let comics = loadComics();
