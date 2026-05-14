@@ -250,6 +250,7 @@ app.get('/archives/comic/:filename', async (req, res) => {
         const filename = req.params.filename;
 
         const url = `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${filename}`;
+        console.log(url);
 
         const response = await fetch(url);
 
