@@ -11,25 +11,31 @@ const port = process.env.PORT || 5000;
   
 app.get('/archives/comic/:filename', async (req, res) => {
     try {
-        const extensions = ['.png', '.jpg', '.gif']; // Add more extensions as needed
+        const extensions = ['.png', '.jpg', '.gif'];
+
         let matchingFile = null;
+        let foundResponse = null;
 
         for (const ext of extensions) {
-            const response = await fetch(`https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${req.params.filename}${ext}`);
-            
+            const response = await fetch(
+                `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${req.params.filename}${ext}`
+            );
+
             if (response.ok) {
                 matchingFile = `${req.params.filename}${ext}`;
+                foundResponse = response;
                 break;
             }
         }
 
-        if (!matchingFile) {
-            throw new Error('File not found');
+        if (!matchingFile || !foundResponse) {
+            return res.status(404).send('File not found');
         }
 
         res.setHeader('Content-Type', getContentType(matchingFile));
 
-        response.body.pipe(res);
+        foundResponse.body.pipe(res);
+
     } catch (error) {
         console.error('Error fetching file:', error);
         res.status(500).send('Internal Server Error');
