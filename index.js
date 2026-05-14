@@ -45,9 +45,8 @@ function loadComics() {
 
     const files = JSON.parse(fs.readFileSync(COMIC_MANIFEST_PATH, 'utf-8'));
 
-    const map = new Map();
-    // key = "chapter/page"
-    // value = Set(ext)
+    const mainMap = new Map();    // chapter/page → Set(ext)
+    const specialMap = new Map(); // page → Set(ext)
 
     for (const f of files) {
         const parsed = path.parse(f.name);
@@ -57,65 +56,69 @@ function loadComics() {
         const match = base.match(/^(?:(\d+))?p(\d+)$/i);
         if (!match) continue;
 
-        const chapter = match[1] ? Number(match[1]) : 0;
+        const chapter = match[1] ? Number(match[1]) : null;
         const page = Number(match[2]);
 
         const code = EXT_MAP[ext];
         if (!code) continue;
 
-        const key = `${chapter}/${page}`;
-
-        if (!map.has(key)) {
-            map.set(key, new Set());
+        if (chapter === null) {
+            // SPECIAL: /1j /2p etc
+            if (!specialMap.has(page)) specialMap.set(page, new Set());
+            specialMap.get(page).add(code);
+        } else {
+            // MAIN: /0/1j etc
+            const key = `${chapter}/${page}`;
+            if (!mainMap.has(key)) mainMap.set(key, new Set());
+            mainMap.get(key).add(code);
         }
+    }
 
-        map.get(key).add(code);
+    const output = [];
+
+    const extOrder = ['j', 'p', 'g'];
+
+    /*
+    |--------------------------------------------------------------------------
+    | 1) MAIN SERIES
+    |--------------------------------------------------------------------------
+    */
+
+    const mainPages = [...mainMap.entries()]
+        .map(([key, variants]) => {
+            const [chapter, page] = key.split('/').map(Number);
+            return { chapter, page, variants: [...variants] };
+        })
+        .sort((a, b) => {
+            if (a.chapter !== b.chapter) return a.chapter - b.chapter;
+            return a.page - b.page;
+        });
+
+    for (const ext of extOrder) {
+        for (const p of mainPages) {
+            if (p.variants.includes(ext)) {
+                output.push(`${p.chapter}/${p.page}${ext}`);
+            }
+        }
     }
 
     /*
     |--------------------------------------------------------------------------
-    | BUILD CLEAN UNIQUE LIST
+    | 2) SPECIAL SERIES
     |--------------------------------------------------------------------------
     */
 
-    const pages = [...map.entries()].map(([key, variants]) => {
-        const [chapter, page] = key.split('/').map(Number);
-
-        return {
-            chapter,
+    const specialPages = [...specialMap.entries()]
+        .map(([page, variants]) => ({
             page,
             variants: [...variants]
-        };
-    });
-
-    /*
-    |--------------------------------------------------------------------------
-    | SORT BASE (CRITICAL FIX)
-    |--------------------------------------------------------------------------
-    | ONLY by chapter/page once
-    |--------------------------------------------------------------------------
-    */
-
-    pages.sort((a, b) => {
-        if (a.chapter !== b.chapter) return a.chapter - b.chapter;
-        return a.page - b.page;
-    });
-
-    const extOrder = ['j', 'p', 'g'];
-
-    const output = [];
-
-    /*
-    |--------------------------------------------------------------------------
-    | EXPAND IN REQUIRED ORDER:
-    | ALL J → ALL P → ALL G
-    |--------------------------------------------------------------------------
-    */
+        }))
+        .sort((a, b) => a.page - b.page);
 
     for (const ext of extOrder) {
-        for (const p of pages) {
+        for (const p of specialPages) {
             if (p.variants.includes(ext)) {
-                output.push(`${p.chapter}/${p.page}${ext}`);
+                output.push(`${p.page}${ext}`);
             }
         }
     }
