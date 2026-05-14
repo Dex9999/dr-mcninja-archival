@@ -25,21 +25,17 @@ const EXT_MAP = {
     '.gif': 'g'
 };
 
+const EXT_PRIORITY = { j: 0, g: 1, p: 2 };
+
 const EXT_MAP_REVERSE = {
     j: '.jpg',
     p: '.png',
     g: '.gif'
 };
 
-const EXT_PRIORITY = { j: 0, p: 1, g: 2 };
-
 /*
 |--------------------------------------------------------------------------
-| LOAD + ORDER COMICS
-|--------------------------------------------------------------------------
-| ORDER RULES:
-| 1) LEGACY GROUP FIRST (p-only naming): 1j,2j,3j... then 1p,2p,3p...
-| 2) THEN chapter/page variants: 0/1j etc
+| LOAD DATA
 |--------------------------------------------------------------------------
 */
 
@@ -51,9 +47,8 @@ function loadComics() {
 
     const files = JSON.parse(fs.readFileSync(COMIC_MANIFEST_PATH, 'utf-8'));
 
-    const map = new Map();
-    // key = "chapter/page"
-    // value = { chapter, page, variants:Set }
+    const main = new Map();   // chapter/page
+    const special = new Map(); // page only (no chapter)
 
     for (const f of files) {
         const parsed = path.parse(f.name);
@@ -63,60 +58,77 @@ function loadComics() {
         const match = base.match(/^(?:(\d+))?p(\d+)$/i);
         if (!match) continue;
 
-        const chapter = match?.[1] ? Number(match[1]) : 0;
+        const chapter = match?.[1] ? Number(match[1]) : null;
         const page = Number(match[2]);
 
-        const key = `${chapter}/${page}`;
+        const code = EXT_MAP[ext];
+        if (!code) continue;
 
-        if (!map.has(key)) {
-            map.set(key, {
-                chapter,
-                page,
-                variants: new Set()
-            });
+        /*
+        |--------------------------------------------------------------------------
+        | MAIN SERIES (chapter exists)
+        |--------------------------------------------------------------------------
+        */
+        if (chapter !== null) {
+            const key = `${chapter}/${page}`;
+            if (!main.has(key)) main.set(key, { chapter, page, variants: new Set() });
+            main.get(key).variants.add(code);
         }
 
-        const code = EXT_MAP[ext];
-        if (code) map.get(key).variants.add(code);
+        /*
+        |--------------------------------------------------------------------------
+        | SPECIAL SERIES (NO CHAPTER)
+        |--------------------------------------------------------------------------
+        */
+        else {
+            const key = page;
+            if (!special.has(key)) special.set(key, new Set());
+            special.get(key).add(code);
+        }
     }
 
-    const pages = [...map.entries()]
+    const output = [];
+
+    /*
+    |--------------------------------------------------------------------------
+    | 1) MAIN SERIES: /0/1, /0/2 ...
+    |--------------------------------------------------------------------------
+    */
+
+    const mainPages = [...main.entries()]
         .map(([key, v]) => ({
             key,
             chapter: v.chapter,
-            page: v.page,
-            variants: [...v.variants]
+            page: v.page
         }))
         .sort((a, b) => {
             if (a.chapter !== b.chapter) return a.chapter - b.chapter;
             return a.page - b.page;
         });
 
-    const output = [];
-
-    /*
-    |--------------------------------------------------------------------------
-    | 1) REGULAR (NO EXTENSION) FIRST
-    |--------------------------------------------------------------------------
-    */
-
-    for (const p of pages) {
-        output.push(p.key); // "0/1", "0/2", ...
+    for (const p of mainPages) {
+        output.push(`${p.key}`); // /0/1 (no extension)
     }
 
     /*
     |--------------------------------------------------------------------------
-    | 2) SPECIALS (EXTENSIONS) AFTER
-    | ORDER: j → p → g
+    | 2) SPECIAL SERIES GROUPED BY EXTENSION ORDER
     |--------------------------------------------------------------------------
     */
 
-    const order = ['j', 'p', 'g'];
+    const specialPages = [...special.entries()]
+        .map(([page, variants]) => ({
+            page,
+            variants: [...variants]
+        }))
+        .sort((a, b) => a.page - b.page);
 
-    for (const ext of order) {
-        for (const p of pages) {
+    const extOrder = ['j', 'g', 'p'];
+
+    for (const ext of extOrder) {
+        for (const p of specialPages) {
             if (p.variants.includes(ext)) {
-                output.push(`${p.key}${ext}`); // "0/1j"
+                output.push(`${p.page}${ext}`); // /1j /2j etc
             }
         }
     }
@@ -219,7 +231,7 @@ ${next ? `<a class="nav" href="${toUrl(next)}">Next →</a>` : `<span class="nav
 
 /*
 |--------------------------------------------------------------------------
-| IMAGE PROXY
+| IMAGE PROXY (ALWAYS INCLUDE EXTENSION)
 |--------------------------------------------------------------------------
 */
 
@@ -227,31 +239,62 @@ app.get('/archives/comic/:id', async (req, res) => {
     try {
         const id = req.params.id;
 
-        const match = id.match(/^(\d+\/)?(\d+)([jpgpnggif])$/i);
-        if (!match) return res.status(400).send('Invalid id');
+        /*
+        |--------------------------------------------------------------------------
+        | MAIN SERIES: /0/1
+        |--------------------------------------------------------------------------
+        */
+        const main = id.match(/^(\d+)\/(\d+)$/);
+        if (main) {
+            const chapter = main[1];
+            const page = main[2];
 
-        const chapterPart = match[1];
-        const page = match[2];
-        const extCode = match[3];
+            // try best available format
+            const tryExts = ['.png', '.jpg', '.gif'];
 
-        const ext = EXT_MAP_REVERSE[extCode];
+            for (const ext of tryExts) {
+                const filename = `${chapter}p${page}${ext}`;
 
-        const base = chapterPart
-            ? `${chapterPart.replace('/', '')}p${page}`
-            : `p${page}`;
+                const url =
+                    `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${filename}`;
 
-        const filename = `${base}${ext}`;
+                const response = await fetch(url);
+                if (response.ok) {
+                    const buffer = Buffer.from(await response.arrayBuffer());
+                    res.setHeader('Content-Type', getContentType(ext));
+                    return res.send(buffer);
+                }
+            }
 
-        const url =
-            `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${filename}`;
+            return res.status(404).send('Image not found');
+        }
 
-        const response = await fetch(url);
-        if (!response.ok) return res.status(404).send('Image not found');
+        /*
+        |--------------------------------------------------------------------------
+        | SPECIAL SERIES: /1j /2g etc
+        |--------------------------------------------------------------------------
+        */
+        const special = id.match(/^(\d+)([jpgpnggif])$/);
+        if (special) {
+            const page = special[1];
+            const extCode = special[2];
 
-        const buffer = Buffer.from(await response.arrayBuffer());
+            const ext = EXT_MAP_REVERSE[extCode];
+            const filename = `p${page}${ext}`;
 
-        res.setHeader('Content-Type', getContentType(ext));
-        return res.send(buffer);
+            const url =
+                `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${filename}`;
+
+            const response = await fetch(url);
+            if (!response.ok) return res.status(404).send('Image not found');
+
+            const buffer = Buffer.from(await response.arrayBuffer());
+
+            res.setHeader('Content-Type', getContentType(ext));
+            return res.send(buffer);
+        }
+
+        return res.status(400).send('Invalid id');
 
     } catch (err) {
         console.error(err);
