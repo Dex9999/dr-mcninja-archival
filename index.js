@@ -36,20 +36,19 @@ function loadComics() {
 
     return files
         .map(file => {
-            const name = path.parse(file.name).name;
+            const parsed = path.parse(file.name);
+            const nameNoExt = parsed.name;
+            const ext = parsed.ext.toLowerCase();
 
-            // Matches:
-            // 15p12 → chapter 15, page 12
-            // 0p3   → chapter 0, page 3
-            // p12   → page 12
-            const match = name.match(/^(?:(\d+))?p(\d+)$/i);
+            const match = nameNoExt.match(/^(?:(\d+))?p(\d+)$/i);
 
             return {
-                raw: name,
-                file: file.name,
+                id: nameNoExt,        // base id for routing
+                file: file.name,      // full filename
+                ext,                  // extension (IMPORTANT FIX)
                 size: file.size,
                 chapter: match?.[1] ? Number(match[1]) : null,
-                page: match ? Number(match[2]) : Number(name) || 0
+                page: match ? Number(match[2]) : 0
             };
         })
         .sort((a, b) => {
@@ -58,10 +57,9 @@ function loadComics() {
                 if (b.chapter === null) return -1;
                 return a.chapter - b.chapter;
             }
-
             return a.page - b.page;
         })
-        .map(c => c.raw);
+        .map(c => c.id);
 }
 
 // initial load
@@ -241,7 +239,7 @@ img {
 
 /*
 |--------------------------------------------------------------------------
-| IMAGE PROXY (GitHub RAW loader)
+| IMAGE PROXY (GitHub RAW loader - FIXED EXTENSION HANDLING)
 |--------------------------------------------------------------------------
 */
 
@@ -249,8 +247,22 @@ app.get('/archives/comic/:filename', async (req, res) => {
     try {
         const filename = req.params.filename;
 
-        const url = `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${filename}`;
-        console.log(url);
+        // Find real file (with extension) from manifest
+        const raw = fs.readFileSync(COMIC_MANIFEST_PATH, 'utf-8');
+        const files = JSON.parse(raw);
+
+        const match = files.find(f => {
+            const base = path.parse(f.name).name;
+            return base === filename;
+        });
+
+        if (!match) {
+            return res.status(404).send('Image not found');
+        }
+
+        const realFile = match.name;
+
+        const url = `https://raw.githubusercontent.com/Dex9999/dr-mcninja-archival/master/archives/${realFile}`;
 
         const response = await fetch(url);
 
@@ -261,7 +273,7 @@ app.get('/archives/comic/:filename', async (req, res) => {
         const arrayBuffer = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
 
-        const ext = path.extname(filename).toLowerCase();
+        const ext = path.extname(realFile).toLowerCase();
         res.setHeader('Content-Type', getContentType(ext));
 
         return res.send(buffer);
